@@ -7,9 +7,9 @@ node_modules
 !.env.example
 
 # Build output
-.next
-dist
-out
+/.next
+/dist
+/out
 *.tsbuildinfo
 
 # Generated media (pipeline output, not source).
@@ -18,8 +18,9 @@ public/renders
 public/voiceovers
 public/uploads
 
-# Runtime state (recreated by reelFileStore.ensureInitialized)
-data
+# Runtime state, recreated on demand by the file stores.
+# Leading slash matters: an unanchored "data" would also swallow src/data.
+/data
 
 # Editor / OS
 .idea
