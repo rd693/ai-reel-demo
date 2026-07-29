@@ -1,7 +1,63 @@
+# Dependencies
 node_modules
-dist
-.DS_Store
-.env
 
-# Ignore the output video from Git but not videos you import into src/.
+# Secrets — .env alone does NOT match .env.local
+.env
+.env.*
+!.env.example
+
+# Build output
+.next
+dist
 out
+*.tsbuildinfo
+
+# Generated media (pipeline output, not source).
+# Inputs live in public/assets and public/music and ARE tracked.
+public/renders
+public/voiceovers
+public/uploads
+
+# Runtime state (recreated by reelFileStore.ensureInitialized)
+data
+
+# Editor / OS
+.idea
+.DS_Store
+
+# Agent tooling. .agents/ and .claude/skills hold real content and stay tracked;
+# everything below is empty per-tool local config.
+.claude/worktrees
+.agent/
+.cline/
+.codebuddy/
+.codex/
+.commandcode/
+.continue/
+.crush/
+.cursor/
+.factory/
+.gemini/
+.goose/
+.junie/
+.kilocode/
+.kiro/
+.kode/
+.mcpjam/
+.mux/
+.neovate/
+.opencode/
+.openhands/
+.pi/
+.pochi/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.windsurf/
+.zencoder/
+
+# Logs and scratch files
+npm-debug.log*
+yarn-error.log*
+scratch_*.ts

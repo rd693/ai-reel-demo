@@ -1,0 +1,693 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { ArrowLeft, Plus, Clock, Loader2, Video, Sparkles, Settings, Volume2, Globe, Palette, Type, Trash2, X, Mic, Edit, Wand2, Calendar, Layout } from "lucide-react";
+import Link from "next/link";
+import { seriesStore } from "@/lib/series/seriesStore";
+import { Series, FacelessReel, ArtStyle } from "@/types/series";
+import { generateFacelessReelContent } from "@/agents/seriesAgent";
+import { MUSIC_TRACKS } from "@/lib/music";
+
+
+export default function SeriesDetailPage() {
+    const params = useParams();
+    const seriesId = params.id as string;
+
+    const [series, setSeries] = useState<Series | null>(null);
+    const [reels, setReels] = useState<FacelessReel[]>([]);
+    const [generating, setGenerating] = useState(false);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [tempSeries, setTempSeries] = useState<Series | null>(null);
+    const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null);
+
+    const togglePreview = (trackUrl: string) => {
+        if (previewAudio) {
+            previewAudio.pause();
+            if (previewAudio.src.includes(encodeURIComponent(trackUrl)) || previewAudio.src.endsWith(trackUrl)) {
+                setPreviewAudio(null);
+                return;
+            }
+        }
+        
+        // Use proxy only for remote URLs, otherwise use directly (local assets)
+        const finalUrl = trackUrl.startsWith('http') 
+            ? `/api/audio-proxy?url=${encodeURIComponent(trackUrl)}`
+            : trackUrl;
+            
+        const audio = new Audio(finalUrl);
+        audio.volume = 0.3;
+        audio.play().catch(e => console.warn("[Preview] Playback failed:", e));
+        setPreviewAudio(audio);
+        
+        audio.onended = () => setPreviewAudio(null);
+    };
+
+
+    // Cleanup audio on unmount
+    useEffect(() => {
+        return () => {
+            if (previewAudio) previewAudio.pause();
+        };
+    }, [previewAudio]);
+
+
+    const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
+    const [genMode, setGenMode] = useState<'auto' | 'custom'>('auto');
+    const [customScript, setCustomScript] = useState('');
+    const [genNiche, setGenNiche] = useState('');
+    const [selectedArtStyle, setSelectedArtStyle] = useState<ArtStyle | 'series_default'>('series_default');
+    const [visualStyleOverride, setVisualStyleOverride] = useState('');
+
+    useEffect(() => {
+        const allSeries = seriesStore.getAll();
+        const found = allSeries.find(s => s.id === seriesId);
+        if (found) {
+            const enrichedSeries: Series = {
+                ...found,
+                language: found.language || "english",
+                voiceId: found.voiceId || "v1",
+                artStyle: found.artStyle || "cinematic",
+                captionStyle: found.captionStyle || {
+                    type: 'word',
+                    animation: 'pop',
+                    color: '#FFD700',
+                    fontSize: 120,
+                    fontFamily: 'Inter',
+                    boxEnabled: true,
+                    yOffset: 250
+                },
+                musicSettings: found.musicSettings || {
+                    enabled: true,
+                    trackId: 'ambient_dream',
+                    volume: 0.5
+                },
+                usePremiumImageStack: found.usePremiumImageStack || false
+            };
+            setSeries(enrichedSeries);
+            setTempSeries(enrichedSeries);
+            setGenNiche(enrichedSeries.niche || '');
+            const seriesReels = seriesStore.getReelsForSeries(seriesId);
+            setReels(seriesReels.sort((a, b) => 
+                new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+            ));
+        }
+    }, [seriesId]);
+
+    const handleSaveSettings = () => {
+        if (!tempSeries) return;
+        seriesStore.updateSeries(seriesId, tempSeries);
+        setSeries(tempSeries);
+        setIsSettingsOpen(false);
+    };
+
+    const handleGenerate = async () => {
+        if (!series) return;
+        setGenerating(true);
+        setIsGeneratorOpen(false);
+        try {
+            const finalArtStyle = selectedArtStyle === 'series_default' ? series.artStyle : selectedArtStyle;
+
+            const reelData = await generateFacelessReelContent(
+                genMode === 'auto' ? (genNiche as any) : series.niche,
+                finalArtStyle,
+                series.targetDuration || 60,
+                series.language || "english",
+                series.voiceId || "antoni",
+                genMode === 'custom' ? customScript : undefined,
+                genNiche || series.niche,
+                series.seriesContext,
+                series.visualStylePrompt,
+                visualStyleOverride,
+                series.usePremiumImageStack
+            );
+
+            const fullReel: FacelessReel = {
+                ...reelData,
+                seriesId: series.id,
+                artStyle: finalArtStyle as any,
+                visualStyleOverride,
+                generationStatus: "completed",
+                createdAt: new Date(),
+                musicSettings: series.musicSettings,
+                captionStyle: series.captionStyle
+            } as FacelessReel;
+
+            seriesStore.saveReel(seriesId, fullReel);
+            setReels(prev => [fullReel, ...prev]);
+        } catch (error) {
+            console.error("Failed to generate reel", error);
+            alert("Failed to generate. Check terminal for errors.");
+        } finally {
+            setGenerating(false);
+            setVisualStyleOverride('');
+        }
+    };
+
+    if (!series) return <div className="p-20 text-center text-slate-500 font-medium">Loading series configuration...</div>;
+
+    return (
+        <div className="max-w-6xl mx-auto p-8 min-h-screen">
+            {/* Generator Dialog (Premium & Fixed Scrolling) */}
+            {isGeneratorOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md transition-opacity" onClick={() => setIsGeneratorOpen(false)} />
+                    
+                    <div className="relative w-full max-w-xl transform overflow-hidden rounded-[3rem] bg-white text-left align-middle shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] transition-all animate-in fade-in zoom-in duration-300 flex flex-col max-h-[90vh]">
+                        {/* Header */}
+                        <div className="p-8 pb-4 flex items-center justify-between flex-shrink-0">
+                            <div>
+                                <h2 className="text-2xl font-black text-slate-900 flex items-center gap-2">
+                                    <Wand2 className="text-indigo-600" size={24} />
+                                    New Cinematic Reel
+                                </h2>
+                                <p className="text-slate-500 text-sm mt-1">Configure your story and visual direction.</p>
+                            </div>
+                            <button onClick={() => setIsGeneratorOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                                <X size={20} className="text-slate-400" />
+                            </button>
+                        </div>
+
+                        {/* Scrollable Content Area */}
+                        <div className="p-8 pt-4 space-y-8 overflow-y-auto custom-scrollbar flex-1">
+                            <div className="flex p-1 bg-slate-100 rounded-2xl">
+                                <button
+                                    onClick={() => setGenMode('auto')}
+                                    className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${genMode === 'auto' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    Auto Suggest
+                                </button>
+                                <button
+                                    onClick={() => setGenMode('custom')}
+                                    className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${genMode === 'custom' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    Custom Script
+                                </button>
+                            </div>
+
+                            {genMode === 'custom' ? (
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                            <Type size={12} /> Who is this about?
+                                        </label>
+                                        <input
+                                            value={genNiche}
+                                            onChange={(e) => setGenNiche(e.target.value)}
+                                            className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 focus:outline-none focus:border-indigo-500/30 focus:bg-white transition-all text-base font-medium text-slate-900 mt-2"
+                                            placeholder="e.g. Prithviraj Chauhan, Shivaji Maharaj..."
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                            <Mic size={12} /> Paste Your Story
+                                        </label>
+                                        <textarea
+                                            value={customScript}
+                                            onChange={(e) => setCustomScript(e.target.value)}
+                                            rows={5}
+                                            className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-5 focus:outline-none focus:border-indigo-500/30 focus:bg-white transition-all text-base font-medium text-slate-900 resize-none mt-2"
+                                            placeholder="Type or paste your script here..."
+                                        />
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                        <Sparkles size={12} /> What is this reel about?
+                                    </label>
+                                    <input
+                                        value={genNiche}
+                                        onChange={(e) => setGenNiche(e.target.value)}
+                                        className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-5 focus:outline-none focus:border-indigo-500/30 focus:bg-white transition-all text-lg font-medium text-slate-900 mt-2"
+                                        placeholder="e.g. Prithviraj Chauhan, Life of Steve Jobs..."
+                                    />
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                    <Palette size={12} /> Visual Art Style
+                                </label>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+                                    <button
+                                        onClick={() => setSelectedArtStyle('series_default')}
+                                        className={`p-2.5 rounded-xl border text-[10px] font-bold transition-all ${selectedArtStyle === 'series_default'
+                                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg'
+                                            : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-slate-300'
+                                            }`}
+                                    >
+                                        Series Default
+                                    </button>
+                                    {[
+                                        { v: "cinematic_3d", l: "3D Render" },
+                                        { v: "anime", l: "Anime" },
+                                        { v: "realism", l: "Realism" },
+                                        { v: "painting", l: "Painting" },
+                                        { v: "mythology", l: "Mythology" },
+                                        { v: "dark_fantasy", l: "Dark Fantasy" },
+                                        { v: "ghibli", l: "Ghibli" },
+                                        { v: "watercolor_illustration", l: "Watercolor" }
+                                    ].map((style) => (
+                                        <button
+                                            key={style.v}
+                                            onClick={() => setSelectedArtStyle(style.v as any)}
+                                            className={`p-2.5 rounded-xl border text-[10px] font-bold transition-all ${selectedArtStyle === style.v
+                                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg'
+                                                : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            {style.l}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="pb-4">
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                    <Sparkles size={12} /> Visual Prompt Override
+                                </label>
+                                <textarea
+                                    value={visualStyleOverride}
+                                    onChange={(e) => setVisualStyleOverride(e.target.value)}
+                                    rows={2}
+                                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 focus:outline-none focus:border-indigo-500/30 focus:bg-white transition-all text-sm font-medium text-slate-900 resize-none mt-2"
+                                    placeholder="e.g. Add glowing amber eyes, heavy snow falling..."
+                                />
+                                <p className="text-[10px] text-slate-400 mt-2 font-medium ml-1 italic">Optional: Fine-tune the AI's visual generation for this specific reel.</p>
+                            </div>
+                        </div>
+
+                        <div className="p-8 border-t bg-slate-50 flex-shrink-0">
+                            <button
+                                onClick={handleGenerate}
+                                className="w-full py-5 rounded-2xl bg-indigo-600 text-white font-black text-xl hover:bg-indigo-700 hover:scale-[1.01] active:scale-95 transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-3"
+                            >
+                                <Sparkles size={24} />
+                                Launch Generator
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-12">
+                <div className="flex items-center gap-4">
+                    <Link href="/dashboard/series" className="p-2.5 hover:bg-slate-100 rounded-full transition-colors border border-transparent hover:border-slate-200">
+                        <ArrowLeft size={24} className="text-slate-600" />
+                    </Link>
+                    <div>
+                        <h1 className="text-3xl font-black text-slate-900 tracking-tight">{series.name}</h1>
+                        <p className="text-slate-500 flex items-center gap-2 mt-1 text-sm font-medium">
+                            <span className="capitalize">{series.niche.replace("_", " ")}</span>
+                            <span>•</span>
+                            <span className="capitalize">{series.artStyle.replace("_", " ")}</span>
+                            <span>•</span>
+                            <span className="text-indigo-600 font-bold capitalize">{series.frequency}</span>
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <button
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="p-3 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all border border-slate-200"
+                    >
+                        <Settings size={22} />
+                    </button>
+                    <button
+                        onClick={() => setIsGeneratorOpen(true)}
+                        disabled={generating}
+                        className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white px-8 py-3.5 rounded-xl font-black transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
+                    >
+                        {generating ? <Loader2 className="animate-spin" size={20} /> : <Plus size={20} />}
+                        Generate New Reel
+                    </button>
+                </div>
+            </div>
+
+            {/* Reels List (Text-focused cards as requested) */}
+            <div className="space-y-6">
+                <h2 className="text-xl font-black text-slate-900 flex items-center gap-2 ml-2">
+                    <Layout size={22} className="text-indigo-600" />
+                    Production Library
+                </h2>
+
+                {reels.length === 0 && !generating ? (
+                    <div className="py-20 text-center bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                        <div className="w-20 h-20 bg-white rounded-3xl shadow-sm flex items-center justify-center mx-auto mb-6">
+                            <Video size={40} className="text-slate-300" />
+                        </div>
+                        <h3 className="text-xl font-black text-slate-900">No reels yet</h3>
+                        <p className="text-slate-500 mb-8 max-w-sm mx-auto">Your cinematic journey starts here. Click the button above to generate your first AI masterpiece.</p>
+                    </div>
+                ) : null}
+
+                {generating && (
+                    <div className="bg-white rounded-[2.5rem] p-10 border border-indigo-100 shadow-xl shadow-indigo-50/50 flex items-center gap-8 animate-pulse border-l-8 border-l-indigo-600">
+                        <div className="w-20 h-20 bg-indigo-50 rounded-3xl flex items-center justify-center flex-shrink-0">
+                            <Loader2 className="animate-spin text-indigo-600" size={40} />
+                        </div>
+                        <div>
+                            <h3 className="font-black text-slate-900 text-xl">{genMode === 'custom' ? "Processing your script..." : "AI is crafting your story..."}</h3>
+                            <p className="text-base text-slate-500 mt-1 font-medium">
+                                {genMode === 'custom'
+                                    ? "Segmenting narrative and generating matching visual assets."
+                                    : "Scripting, generating cinematic assets, and composing the timeline."}
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {reels.map((reel, idx) => (
+                    <div key={idx} className="group bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all overflow-hidden">
+                        <div className="px-6 py-4 flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-4 min-w-0">
+                                <div className="bg-slate-50 group-hover:bg-indigo-50 p-3 rounded-xl text-slate-400 group-hover:text-indigo-600 transition-colors flex-shrink-0">
+                                    <Video size={20} />
+                                </div>
+                                <div className="min-w-0">
+                                    <h3 className="font-black text-slate-900 truncate text-base">{reel.businessName || "Untitled Reel"}</h3>
+                                    <div className="flex flex-wrap items-center gap-3 text-xs font-medium text-slate-400 mt-0.5">
+                                        <span className="flex items-center gap-1"><Calendar size={12} /> {new Date(reel.createdAt || "").toLocaleDateString()}</span>
+                                        <span>·</span>
+                                        <span className="text-indigo-500 flex items-center gap-1"><Sparkles size={12} /> {reel.scenes.length} Scenes</span>
+                                        <span>·</span>
+                                        <span className="capitalize flex items-center gap-1"><Palette size={12} /> {reel.artStyle?.replace(/_/g, ' ')}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                                <Link
+                                    href={`/dashboard/reels/${reel.id}`}
+                                    className="px-4 py-2 bg-slate-900 text-white rounded-xl font-bold text-xs hover:bg-indigo-600 transition-all flex items-center gap-1.5 whitespace-nowrap"
+                                >
+                                    <Edit size={13} />
+                                    Review &amp; Export
+                                </Link>
+                                <button
+                                    onClick={() => {
+                                        if (confirm("Delete this reel?")) {
+                                            const updated = seriesStore.deleteReel(seriesId, reel.id!);
+                                            setReels(updated);
+                                        }
+                                    }}
+                                    className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border border-transparent hover:border-red-100"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Settings Panel (Premium Sliding Drawer with Fixed Scrolling) */}
+            {isSettingsOpen && tempSeries && (
+                <div className="fixed inset-0 z-[150] flex justify-end">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setIsSettingsOpen(false)} />
+                    <div className="relative w-full max-w-xl bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+                        <div className="p-8 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+                            <div>
+                                <h2 className="text-2xl font-black text-slate-900">Series Configuration</h2>
+                                <p className="text-sm text-slate-500 font-medium mt-1">Master controls for all generated content.</p>
+                            </div>
+                            <button onClick={() => setIsSettingsOpen(false)} className="p-3 hover:bg-slate-100 rounded-full transition-colors group">
+                                <X size={28} className="text-slate-400 group-hover:text-slate-900" />
+                            </button>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
+                            <div className="space-y-8">
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                            <Clock size={14} /> Target Duration
+                                        </label>
+                                        <select
+                                            value={tempSeries.targetDuration}
+                                            onChange={(e) => setTempSeries({ ...tempSeries, targetDuration: parseInt(e.target.value) })}
+                                            className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-bold focus:border-indigo-500/30 outline-none transition-all cursor-pointer"
+                                        >
+                                            <option value={30}>30 Seconds</option>
+                                            <option value={60}>1 Minute</option>
+                                            <option value={90}>1.5 Minutes</option>
+                                            <option value={180}>3 Minutes</option>
+                                        </select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                            <Globe size={14} /> Narrative Lang
+                                        </label>
+                                        <select
+                                            value={tempSeries.language}
+                                            onChange={(e) => setTempSeries({ ...tempSeries, language: e.target.value })}
+                                            className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-bold focus:border-indigo-500/30 outline-none transition-all cursor-pointer"
+                                        >
+                                            <option value="english">English</option>
+                                            <option value="hindi">Hindi (हिंदी)</option>
+                                        </select>
+                                    </div>
+                                    <div className="col-span-2 space-y-2">
+                                        <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                            <Mic size={14} /> Voice Persona
+                                        </label>
+                                        <select
+                                            value={tempSeries.voiceId}
+                                            onChange={(e) => setTempSeries({ ...tempSeries, voiceId: e.target.value })}
+                                            className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-bold focus:border-indigo-500/30 outline-none transition-all cursor-pointer"
+                                        >
+                                            <option value="antoni">Antoni (Deep Narrative)</option>
+                                            <option value="bella">Bella (Soft Storyteller)</option>
+                                            <option value="arnold">Arnold (Strong Voice)</option>
+                                            <option value="josh">Josh (Energetic)</option>
+                                            <option value="v1">Narrator V1 (Balanced)</option>
+                                            <option value="v2">Narrator V2 (Calm)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                        <Sparkles size={14} /> Series Narrative DNA
+                                    </label>
+                                    <textarea
+                                        value={tempSeries.seriesContext || ''}
+                                        onChange={(e) => setTempSeries({ ...tempSeries, seriesContext: e.target.value })}
+                                        rows={4}
+                                        placeholder="e.g. Biographical Indian history series. Focus on warriors and kings. Emotional, patriotic tone."
+                                        className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-medium resize-none focus:border-indigo-500/30 outline-none transition-all"
+                                    />
+                                    <p className="text-[11px] text-slate-400 mt-2 font-medium ml-1">
+                                        This context flows into every script and image prompt in this series.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                        <Palette size={14} /> Global Visual Signature
+                                    </label>
+                                    <textarea
+                                        value={tempSeries.visualStylePrompt || ''}
+                                        onChange={(e) => setTempSeries({ ...tempSeries, visualStylePrompt: e.target.value })}
+                                        rows={4}
+                                        placeholder="e.g. Cinematic lighting, deep shadows, moody atmospheric fog, 8k hyper-realistic textures."
+                                        className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-medium resize-none focus:border-indigo-500/30 outline-none transition-all"
+                                    />
+                                    <p className="text-[11px] text-slate-400 mt-2 font-medium ml-1">
+                                        Global aesthetic rules applied to ALL reels in this series.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                        <Palette size={14} /> Base Art Style
+                                    </label>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                        {[
+                                            { v: "cinematic_3d", l: "3D Render" },
+                                            { v: "anime", l: "Anime" },
+                                            { v: "realism", l: "Realism" },
+                                            { v: "painting", l: "Painting" },
+                                            { v: "ghibli", l: "Ghibli" },
+                                            { v: "watercolor_illustration", l: "Watercolor" },
+                                            { v: "pixel_art", l: "Pixel Art" },
+                                            { v: "mythology", l: "Mythology" },
+                                            { v: "dark_fantasy", l: "Dark Fantasy" },
+                                            { v: "comic", l: "Comic" },
+                                            { v: "creepy_comic", l: "Creepy Comic" },
+                                            { v: "modern_cartoon", l: "Modern Cartoon" },
+                                            { v: "disney", l: "Disney" },
+                                            { v: "lego", l: "LEGO" },
+                                            { v: "polaroid", l: "Polaroid" },
+                                            { v: "fantastic", l: "Fantastic" }
+                                        ].map((style) => (
+                                            <button
+                                                key={style.v}
+                                                onClick={() => setTempSeries({ ...tempSeries, artStyle: style.v as any })}
+                                                className={`p-3.5 rounded-2xl border-2 text-[11px] font-black transition-all ${tempSeries.artStyle === style.v
+                                                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-100'
+                                                        : 'bg-white border-slate-100 text-slate-500 hover:border-slate-300'
+                                                    }`}
+                                            >
+                                                {style.l}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 space-y-4">
+                                    <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                        <Sparkles size={14} /> AI Generation Stack
+                                    </label>
+                                    <div className="bg-slate-50 p-6 rounded-[2rem] space-y-4 border-2 border-slate-100">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <span className="text-base font-black text-slate-800 block">Premium (Pro) Stack</span>
+                                                <span className="text-[10px] text-slate-400 font-bold block mt-0.5">Claude + ElevenLabs + Fal.ai</span>
+                                            </div>
+                                            <button
+                                                onClick={() => setTempSeries({
+                                                    ...tempSeries,
+                                                    usePremiumImageStack: !tempSeries.usePremiumImageStack
+                                                })}
+                                                className={`w-14 h-8 rounded-full transition-all relative ${tempSeries.usePremiumImageStack ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                                            >
+                                                <div className={`absolute top-1.5 w-5 h-5 bg-white rounded-full transition-all shadow-md ${tempSeries.usePremiumImageStack ? 'left-7.5' : 'left-1.5'}`} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 space-y-4">
+                                    <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                        <Volume2 size={14} /> Atmospheric Audio
+                                    </label>
+                                    <div className="bg-slate-50 p-6 rounded-[2rem] space-y-6 border-2 border-slate-100">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-base font-black text-slate-800">Background Music</span>
+                                            <button
+                                                onClick={() => setTempSeries({
+                                                    ...tempSeries,
+                                                    musicSettings: { ...tempSeries.musicSettings!, enabled: !tempSeries.musicSettings?.enabled }
+                                                })}
+                                                className={`w-14 h-8 rounded-full transition-all relative ${tempSeries.musicSettings?.enabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                                            >
+                                                <div className={`absolute top-1.5 w-5 h-5 bg-white rounded-full transition-all shadow-md ${tempSeries.musicSettings?.enabled ? 'left-7.5' : 'left-1.5'}`} />
+                                            </button>
+                                        </div>
+                                        {tempSeries.musicSettings?.enabled && (
+                                            <div className="space-y-6">
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                                                        <Volume2 size={12} /> Select Atmosphere
+                                                    </div>
+                                                    <div className="grid grid-cols-1 gap-2">
+                                                        {MUSIC_TRACKS.map((track) => (
+                                                            <div 
+                                                                key={track.id}
+                                                                className={`flex items-center gap-3 p-3 rounded-2xl border-2 transition-all ${
+                                                                    tempSeries.musicSettings?.trackId === track.id
+                                                                        ? 'bg-white border-indigo-600 shadow-md'
+                                                                        : 'bg-white/50 border-slate-100 hover:border-slate-200'
+                                                                }`}
+                                                            >
+                                                                <button
+                                                                    onClick={() => setTempSeries({
+                                                                        ...tempSeries,
+                                                                        musicSettings: { ...tempSeries.musicSettings!, trackId: track.id }
+                                                                    })}
+                                                                    className="flex-1 text-left"
+                                                                >
+                                                                    <div className="text-sm font-bold text-slate-900">{track.name}</div>
+                                                                    <div className="text-[10px] text-slate-400 font-bold uppercase">{track.category}</div>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => togglePreview(track.url)}
+                                                                    className={`p-2 rounded-xl transition-all ${
+                                                                        previewAudio?.src.includes(encodeURIComponent(track.url))
+                                                                            ? 'bg-indigo-600 text-white'
+                                                                            : 'bg-slate-100 text-slate-400 hover:text-indigo-600'
+                                                                    }`}
+                                                                >
+                                                                    {previewAudio?.src.includes(encodeURIComponent(track.url)) ? <X size={14} /> : <Volume2 size={14} />}
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-4">
+                                                    <div className="flex justify-between text-[11px] font-black text-slate-400 uppercase tracking-widest">
+                                                        <span>Mix Level</span>
+                                                        <span className="text-indigo-600">{Math.round((tempSeries.musicSettings.volume || 0.5) * 100)}%</span>
+                                                    </div>
+                                                    <input
+                                                        type="range"
+                                                        min="0" max="1" step="0.01"
+                                                        value={tempSeries.musicSettings.volume}
+                                                        onChange={(e) => setTempSeries({
+                                                            ...tempSeries,
+                                                            musicSettings: { ...tempSeries.musicSettings!, volume: parseFloat(e.target.value) }
+                                                        })}
+                                                        className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 pb-12 space-y-4">
+                                    <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                        <Type size={14} /> Dynamic Captioning
+                                    </label>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <button
+                                            onClick={() => setTempSeries({
+                                                ...tempSeries,
+                                                captionStyle: { ...tempSeries.captionStyle!, type: 'word' }
+                                            })}
+                                            className={`p-6 rounded-[2rem] border-2 text-left transition-all ${tempSeries.captionStyle?.type === 'word'
+                                                    ? 'bg-indigo-50 border-indigo-600 shadow-xl shadow-indigo-50/50'
+                                                    : 'bg-white border-slate-100 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            <p className="text-lg font-black text-slate-900">Word Pops</p>
+                                            <p className="text-xs text-slate-500 mt-2 font-medium leading-relaxed">High retention, one word at a time.</p>
+                                        </button>
+                                        <button
+                                            onClick={() => setTempSeries({
+                                                ...tempSeries,
+                                                captionStyle: { ...tempSeries.captionStyle!, type: 'sentence' }
+                                            })}
+                                            className={`p-6 rounded-[2rem] border-2 text-left transition-all ${tempSeries.captionStyle?.type === 'sentence'
+                                                    ? 'bg-indigo-50 border-indigo-600 shadow-xl shadow-indigo-50/50'
+                                                    : 'bg-white border-slate-100 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            <p className="text-lg font-black text-slate-900">Sentence</p>
+                                            <p className="text-xs text-slate-500 mt-2 font-medium leading-relaxed">Classic subtitles for clear reading.</p>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="p-8 border-t bg-white flex-shrink-0">
+                            <button 
+                                onClick={handleSaveSettings} 
+                                className="w-full bg-slate-900 text-white py-5 rounded-[2rem] font-black text-xl hover:bg-indigo-600 hover:scale-[1.01] active:scale-95 transition-all shadow-2xl shadow-slate-100"
+                            >
+                                Deploy Configuration
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
