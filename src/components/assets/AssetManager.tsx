@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Asset } from "../../lib/reel/reelTypes";
+import { Asset } from "../../types/reel";
 import { Upload, Trash2, Video as VideoIcon, Loader2, Plus } from "lucide-react";
 
 export function AssetManager() {

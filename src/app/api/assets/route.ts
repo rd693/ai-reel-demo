@@ -1,7 +1,7 @@
 /** Stability fix: Normalized relative imports */
 import { NextResponse } from "next/server";
 import { assetFileStore } from "../../../lib/assets/assetFileStore";
-import { Asset } from "../../../lib/reel/reelTypes";
+import { Asset } from "../../../types/reel";
 import fs from "fs/promises";
 import path from "path";
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Play, Pause, Layers, Trash2, ChevronRight, Film, Clock } from "lucide-react";
+import { Plus, Play, Pause, Layers, Trash2, ChevronRight, Film, Clock, FolderOpen } from "lucide-react";
 import { seriesStore } from "../../../lib/series/seriesStore";
 import { Series, NicheType } from "../../../types/series";
 
@@ -55,13 +55,22 @@ export default function SeriesDashboardPage() {
                     <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Content Series</h1>
                     <p className="text-slate-500 mt-1 text-sm">Manage your automated video channels</p>
                 </div>
-                <Link
-                    href="/dashboard/series/new"
-                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-semibold transition-colors shadow-sm text-sm"
-                >
-                    <Plus size={16} />
-                    New Series
-                </Link>
+                <div className="flex items-center gap-2">
+                    <Link
+                        href="/dashboard/assets"
+                        className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl font-semibold transition-colors shadow-sm text-sm"
+                    >
+                        <FolderOpen size={16} />
+                        Assets
+                    </Link>
+                    <Link
+                        href="/dashboard/series/new"
+                        className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-semibold transition-colors shadow-sm text-sm"
+                    >
+                        <Plus size={16} />
+                        New Series
+                    </Link>
+                </div>
             </div>
 
             {/* Empty state */}

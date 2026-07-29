@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { Asset } from "../reel/reelTypes";
+import { Asset } from "../../types/reel";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const ASSETS_FILE = path.join(DATA_DIR, "assets.json");

@@ -1,4 +1,4 @@
-import { ReelData, ReelScene } from "../data/demoReelData";
+import { ReelData, ReelScene } from "./reel";
 
 export type NicheType = string;
 
