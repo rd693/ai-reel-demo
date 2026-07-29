@@ -68,6 +68,6 @@ public/uploads
 # Logs and scratch files
 npm-debug.log*
 yarn-error.log*
-scratch_*.ts
+scratch_*
 
 /src/generated/prisma

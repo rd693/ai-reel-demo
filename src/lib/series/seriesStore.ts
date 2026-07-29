@@ -87,4 +87,53 @@ export const seriesStore = {
     async deleteReel(reelId: string): Promise<void> {
         await request(`/api/reels/${reelId}`, { method: "DELETE" });
     },
+
+    /**
+     * Kicks off server-side generation and returns the reel row immediately.
+     * Generation continues on the server; poll getReel() and watch
+     * generationStatus. Closing the tab no longer cancels anything.
+     */
+    startGeneration(seriesId: string, options: GenerationOptions = {}): Promise<FacelessReel> {
+        return request<FacelessReel>(`/api/series/${seriesId}/reels/generate`, {
+            method: "POST",
+            body: JSON.stringify(options),
+        });
+    },
+
+    /** Retries a failed reel, skipping the stages that already succeeded. */
+    resumeGeneration(reelId: string): Promise<FacelessReel> {
+        return request<FacelessReel>(`/api/reels/${reelId}/generate`, { method: "POST" });
+    },
+
+    startRender(reelId: string): Promise<RenderJob> {
+        return request<RenderJob>("/api/render", {
+            method: "POST",
+            body: JSON.stringify({ reelId }),
+        });
+    },
+
+    async getRenderJob(reelId: string): Promise<RenderJob | null> {
+        const res = await fetch(`/api/render?reelId=${reelId}`);
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error("Failed to read render job");
+        return res.json();
+    },
+};
+
+export type GenerationOptions = {
+    niche?: string;
+    subject?: string;
+    customScript?: string;
+    artStyle?: string;
+    visualStyleOverride?: string;
+    title?: string;
+};
+
+export type RenderJob = {
+    id: string;
+    reelId: string;
+    status: "queued" | "processing" | "completed" | "failed";
+    progress: number;
+    outputPath?: string;
+    error?: string;
 };

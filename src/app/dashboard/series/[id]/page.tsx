@@ -6,7 +6,6 @@ import { ArrowLeft, Plus, Clock, Loader2, Video, Sparkles, Settings, Volume2, Gl
 import Link from "next/link";
 import { seriesStore } from "@/lib/series/seriesStore";
 import { Series, FacelessReel, ArtStyle } from "@/types/series";
-import { generateFacelessReelContent } from "@/agents/seriesAgent";
 import { MUSIC_TRACKS } from "@/lib/music";
 
 
@@ -116,43 +115,43 @@ export default function SeriesDetailPage() {
         try {
             const finalArtStyle = selectedArtStyle === 'series_default' ? series.artStyle : selectedArtStyle;
 
-            const reelData = await generateFacelessReelContent(
-                genMode === 'auto' ? (genNiche as any) : series.niche,
-                finalArtStyle,
-                series.targetDuration || 60,
-                series.language || "english",
-                series.voiceId || "antoni",
-                genMode === 'custom' ? customScript : undefined,
-                genNiche || series.niche,
-                series.seriesContext,
-                series.visualStylePrompt,
+            // The server owns the pipeline now. This returns as soon as the row
+            // exists; generation continues even if this tab is closed.
+            const reel = await seriesStore.startGeneration(seriesId, {
+                niche: genMode === 'auto' ? genNiche : series.niche,
+                subject: genNiche || series.niche,
+                customScript: genMode === 'custom' ? customScript : undefined,
+                artStyle: finalArtStyle,
                 visualStyleOverride,
-                series.usePremiumImageStack
-            );
+            });
 
-            const fullReel: FacelessReel = {
-                ...reelData,
-                seriesId: series.id,
-                artStyle: finalArtStyle as any,
-                visualStyleOverride,
-                generationStatus: "completed",
-                createdAt: new Date(),
-                musicSettings: series.musicSettings,
-                captionStyle: series.captionStyle
-            } as FacelessReel;
-
-            // Use the persisted row: it carries the server-assigned id that the
-            // reel detail page and render jobs are addressed by.
-            const saved = await seriesStore.saveReel(seriesId, fullReel);
-            setReels(prev => [saved, ...prev]);
+            setReels(prev => [reel, ...prev]);
         } catch (error) {
-            console.error("Failed to generate reel", error);
-            alert("Failed to generate. Check terminal for errors.");
+            console.error("Failed to start generation", error);
+            alert(error instanceof Error ? error.message : "Failed to start generation.");
         } finally {
             setGenerating(false);
             setVisualStyleOverride('');
         }
     };
+
+    // While any reel is mid-pipeline, refresh the list so status and scene
+    // count advance without the user reloading.
+    const hasReelInFlight = reels.some(r =>
+        ["pending", "scripted", "voicing", "visualizing", "rendering"].includes(r.generationStatus),
+    );
+
+    useEffect(() => {
+        if (!hasReelInFlight) return;
+        const timer = setInterval(async () => {
+            try {
+                setReels(await seriesStore.getReelsForSeries(seriesId));
+            } catch {
+                // Transient failures are fine; the next tick retries.
+            }
+        }, 3000);
+        return () => clearInterval(timer);
+    }, [hasReelInFlight, seriesId]);
 
     if (!series) return <div className="p-20 text-center text-slate-500 font-medium">Loading series configuration...</div>;
 

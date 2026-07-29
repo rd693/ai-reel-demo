@@ -1,75 +1,110 @@
 import { NextResponse } from "next/server";
-import { renderReelToMp4 } from "@/lib/remotion/renderReel";
 import path from "path";
-import fs from "fs";
+import fs from "fs/promises";
 
-// Simple in-memory status tracker (for local demo)
-const renderJobs: Record<string, { status: string; progress: number; downloadUrl?: string; error?: string }> = {};
+import { reelRepo } from "@/lib/db/reelRepo";
+import { renderJobRepo } from "@/lib/db/renderJobRepo";
+import { renderReelToMp4 } from "@/lib/remotion/renderReel";
 
+// Jobs left mid-flight by a restart cannot resume — nothing is watching them —
+// so they are failed once on first use rather than polled forever by a client.
+let staleJobsCleared = false;
+async function clearStaleJobsOnce() {
+    if (staleJobsCleared) return;
+    staleJobsCleared = true;
+    const count = await renderJobRepo.failStaleJobs();
+    if (count > 0) console.log(`[render] Failed ${count} job(s) interrupted by a restart`);
+}
+
+/** Starts a render and returns its job id. Progress lives in the database. */
 export async function POST(req: Request) {
     try {
-        const { reelId, reelData } = await req.json();
+        await clearStaleJobsOnce();
 
-        if (!reelId || !reelData) {
-            return NextResponse.json({ error: "Missing reelId or reelData" }, { status: 400 });
+        const { reelId } = await req.json();
+        if (!reelId) {
+            return NextResponse.json({ error: "reelId is required" }, { status: 400 });
         }
 
-        // Check if already rendering
-        if (renderJobs[reelId] && renderJobs[reelId].status === "processing") {
-            return NextResponse.json({ jobId: reelId, ...renderJobs[reelId] });
+        // The reel is read from the database rather than trusted from the
+        // request body, so a render always reflects what was actually saved.
+        const reel = await reelRepo.getById(reelId);
+        if (!reel) return NextResponse.json({ error: "Reel not found" }, { status: 404 });
+
+        if (!reel.scenes.length) {
+            return NextResponse.json({ error: "Reel has no scenes to render" }, { status: 400 });
         }
 
-        // Initialize/Reset Job
-        renderJobs[reelId] = { status: "processing", progress: 0 };
-
-        const outputDir = path.join(process.cwd(), "public", "renders");
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
+        const existing = await renderJobRepo.latestForReel(reelId);
+        if (existing && ["queued", "processing"].includes(existing.status)) {
+            return NextResponse.json(existing, { status: 202 });
         }
 
-        // Use a unique filename for each render to avoid caching issues
-        const timestamp = Date.now();
-        const fileName = `reel-${reelId}-${timestamp}.mp4`;
-        const outputPath = path.join(outputDir, fileName);
-        const downloadUrl = `/renders/${fileName}?t=${timestamp}`;
+        const job = await renderJobRepo.create(reelId);
 
-        // Fire and forget the render process
-        renderReelToMp4({
-            reelId,
-            reelData,
-            outputPath,
-            onProgress: (progress) => {
-                if (renderJobs[reelId]) {
-                    renderJobs[reelId].progress = Math.round(progress * 100);
-                }
-            }
-        }).then(() => {
-            if (renderJobs[reelId]) {
-                renderJobs[reelId].status = "completed";
-                renderJobs[reelId].progress = 100;
-                renderJobs[reelId].downloadUrl = downloadUrl;
-            }
-        }).catch((err) => {
-            if (renderJobs[reelId]) {
-                renderJobs[reelId].status = "failed";
-                renderJobs[reelId].error = err.message;
-            }
-        });
+        const outputDir = path.join(process.cwd(), "public", "renders", reelId);
+        await fs.mkdir(outputDir, { recursive: true });
+        const outputPath = path.join(outputDir, `${job.id}.mp4`);
+        const publicPath = `/renders/${reelId}/${job.id}.mp4`;
 
-        return NextResponse.json({ jobId: reelId, status: "processing" });
+        // Not awaited: renders take minutes. Unlike the previous in-memory job
+        // map, every transition below is written to the database, so a finished
+        // MP4 is still discoverable after a restart.
+        void (async () => {
+            try {
+                await renderJobRepo.markProcessing(job.id);
+                await reelRepo.setStatus(reelId, "rendering");
+
+                let lastWritten = 0;
+                await renderReelToMp4({
+                    reelId,
+                    reelData: reel,
+                    outputPath,
+                    onProgress: (progress) => {
+                        // Throttle to whole percents: renderMedia fires this per
+                        // frame, which would be thousands of writes per render.
+                        const percent = Math.round(progress * 100);
+                        if (percent > lastWritten) {
+                            lastWritten = percent;
+                            void renderJobRepo.setProgress(job.id, percent).catch(() => {});
+                        }
+                    },
+                });
+
+                await renderJobRepo.markCompleted(job.id, publicPath);
+                await reelRepo.setStatus(reelId, "completed");
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                console.error(`[render] Job ${job.id} failed:`, message);
+                await renderJobRepo.markFailed(job.id, message).catch(() => {});
+                await reelRepo.setStatus(reelId, "failed", message).catch(() => {});
+            }
+        })();
+
+        return NextResponse.json(job, { status: 202 });
     } catch (error) {
-        console.error("Render API Error:", error);
+        console.error("[api/render] failed to start:", error);
         return NextResponse.json({ error: "Failed to start render" }, { status: 500 });
     }
 }
 
+/** Poll a job by id, or the latest job for a reel. */
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
+    const jobId = searchParams.get("jobId");
     const reelId = searchParams.get("reelId");
 
-    if (!reelId || !renderJobs[reelId]) {
-        return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
+    try {
+        const job = jobId
+            ? await renderJobRepo.getById(jobId)
+            : reelId
+              ? await renderJobRepo.latestForReel(reelId)
+              : null;
 
-    return NextResponse.json(renderJobs[reelId]);
+        if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+        return NextResponse.json(job);
+    } catch (error) {
+        console.error("[api/render] status lookup failed:", error);
+        return NextResponse.json({ error: "Failed to read job" }, { status: 500 });
+    }
 }

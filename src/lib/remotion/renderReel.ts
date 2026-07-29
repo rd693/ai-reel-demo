@@ -4,102 +4,96 @@ import path from "path";
 import { FacelessReel } from "../../types/series";
 
 type RenderReelOptions = {
-  reelId: string;
-  reelData: FacelessReel;
-  outputPath: string;
-  onProgress?: (progress: number) => void;
+    reelId: string;
+    reelData: FacelessReel;
+    outputPath: string;
+    onProgress?: (progress: number) => void;
 };
 
+// Bundling the Remotion project takes 20-60s and the output only depends on
+// source files, not on the reel being rendered. It used to run on every single
+// render. Cached as a promise so concurrent renders share one bundle instead of
+// racing to build several.
+let bundlePromise: Promise<string> | null = null;
+
+function getBundle(): Promise<string> {
+    if (!bundlePromise) {
+        console.log("[Remotion] Bundling project (first render)...");
+        bundlePromise = bundle(path.join(process.cwd(), "src/index.ts")).catch((err) => {
+            // Never cache a failed bundle, or every later render inherits it.
+            bundlePromise = null;
+            throw err;
+        });
+    }
+    return bundlePromise;
+}
+
+/** Drops the cached bundle so the next render picks up source changes. */
+export function invalidateBundle() {
+    bundlePromise = null;
+}
+
+/**
+ * Rewrites root-relative paths to absolute URLs.
+ *
+ * The headless renderer loads the composition from the bundle's own origin, so
+ * "/uploads/x.png" would resolve against the wrong host. Everything the reel
+ * references is made absolute against the app's public URL.
+ */
+function makeAbsolute<T>(value: T, baseUrl: string): T {
+    if (typeof value === "string") {
+        return (value.startsWith("/") ? `${baseUrl}${value}` : value) as T;
+    }
+    if (Array.isArray(value)) {
+        return value.map((item) => makeAbsolute(item, baseUrl)) as T;
+    }
+    if (value && typeof value === "object") {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, val]) => [key, makeAbsolute(val, baseUrl)]),
+        ) as T;
+    }
+    return value;
+}
+
 export async function renderReelToMp4({
-  reelId,
-  reelData,
-  outputPath,
-  onProgress,
-}: RenderReelOptions) {
-  console.log(`[Remotion] Starting render for reel ${reelId}...`);
+    reelId,
+    reelData,
+    outputPath,
+    onProgress,
+}: RenderReelOptions): Promise<string> {
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    const absoluteReelData = { ...makeAbsolute(reelData, baseUrl), baseHost: baseUrl };
 
-  // 🚨 FIX: Rewrite relative URLs to absolute for the headless renderer
-  // Remotion runs on port 3001, but the API/Assets are on 3000.
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-  
-  const makeAbsolute = (obj: any): any => {
-      if (!obj) return obj;
-      if (typeof obj === 'string' && obj.startsWith('/')) {
-          return `${baseUrl}${obj}`;
-      }
-      if (Array.isArray(obj)) {
-          return obj.map(makeAbsolute);
-      }
-      if (typeof obj === 'object') {
-          const newObj: any = {};
-          for (const key in obj) {
-              newObj[key] = makeAbsolute(obj[key]);
-          }
-          return newObj;
-      }
-      return obj;
-  };
-
-  const absoluteReelData = {
-    ...makeAbsolute(reelData),
-    baseHost: baseUrl
-  };
-  console.log("[Remotion] Normalized relative URLs to absolute and injected baseHost.");
-
-  try {
-    // 1. Point to the entry file (Root.tsx)
-    const entryPoint = path.join(process.cwd(), "src/index.ts");
-
-    // 2. Bundle the project
-    console.log("[Remotion] Bundling project...");
-    const bundleLocation = await bundle(entryPoint);
-
-    // 3. Select the composition
-    console.log("[Remotion] Selecting composition 'FacelessReel'...");
-    
-    // Calculate exact duration
-    const durationMs = (reelData as any).actualDuration || reelData.scenes.reduce((acc, s) => acc + (s.durationInSeconds || 0), 0) * 1000;
-    const totalDurationSeconds = Math.max(1, durationMs / 1000);
+    const durationMs =
+        reelData.actualDuration ||
+        reelData.scenes.reduce((acc, s) => acc + (s.durationInSeconds || 0), 0) * 1000;
     const fps = 30;
-    const durationInFrames = Math.ceil(totalDurationSeconds * fps);
+    const durationInFrames = Math.ceil((Math.max(1, durationMs / 1000)) * fps);
 
-    console.log(`[Remotion] Target Duration: ${totalDurationSeconds.toFixed(2)}s (${durationInFrames} frames)`);
+    console.log(
+        `[Remotion] Rendering ${reelId}: ${(durationMs / 1000).toFixed(2)}s (${durationInFrames} frames)`,
+    );
+
+    const serveUrl = await getBundle();
+    const inputProps = { reel: absoluteReelData };
 
     const composition = await selectComposition({
-      serveUrl: bundleLocation,
-      id: "FacelessReel",
-      inputProps: {
-        reel: absoluteReelData,
-      },
+        serveUrl,
+        id: "FacelessReel",
+        inputProps,
     });
 
-    // 4. Render the media
-    console.log("[Remotion] Rendering media to MP4...");
     await renderMedia({
-      composition: {
-        ...composition,
-        durationInFrames,
-      },
-      serveUrl: bundleLocation,
-      codec: "h264",
-      outputLocation: outputPath,
-      inputProps: {
-        reel: absoluteReelData,
-      },
-      crf: 18,
-      timeoutInMilliseconds: 240000, // 4 minutes
-      onProgress: ({ progress }) => {
-        if (onProgress) onProgress(progress);
-        if (Math.round(progress * 100) % 10 === 0) {
-            console.log(`[Remotion] Progress: ${Math.round(progress * 100)}%`);
-        }
-      },
+        composition: { ...composition, durationInFrames },
+        serveUrl,
+        codec: "h264",
+        outputLocation: outputPath,
+        inputProps,
+        crf: 18,
+        timeoutInMilliseconds: 240000,
+        onProgress: ({ progress }) => onProgress?.(progress),
     });
 
-    console.log(`[Remotion] Render complete! Saved to: ${outputPath}`);
+    console.log(`[Remotion] Render complete: ${outputPath}`);
     return outputPath;
-  } catch (error) {
-    console.error("[Remotion] Render failed:", error);
-    throw error;
-  }
 }

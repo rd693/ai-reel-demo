@@ -1,38 +1,36 @@
 import { NextResponse } from "next/server";
-import { synthesizeSpeech, synthesizeSpeechWithTimestamps } from "@/lib/audio/elevenlabs";
-import { synthesizeWithAzure } from "@/lib/audio/azureTTS";
+import { synthesizeVoiceover } from "@/lib/audio/synthesizeVoiceover";
 
+// Provider selection and fallback now live in lib/audio/synthesizeVoiceover so
+// the pipeline and this route cannot drift apart.
+//
+// Note the response shape changed: `audioUrl` is a path under /voiceovers, not
+// a base64 data URL. Storing the base64 was what filled the old localStorage
+// quota and bloated every reel row.
 export async function POST(req: Request) {
     try {
         const { text, voiceId, language, usePremium } = await req.json();
-        
-        if (!text) {
+
+        if (!text?.trim()) {
             return NextResponse.json({ error: "Text is required" }, { status: 400 });
         }
 
-        // 1. If premium is requested, use ElevenLabs with Timestamps directly (Pro Stack)
-        if (usePremium) {
-            const premiumVoiceData = await synthesizeSpeechWithTimestamps(text, voiceId, language);
-            if (premiumVoiceData) {
-                console.log("[VoiceAPI] Successfully synthesized premium speech with timestamps");
-                return NextResponse.json(premiumVoiceData);
-            }
-            console.warn("[VoiceAPI] Premium synthesis failed, falling back to Free stack");
+        const voice = await synthesizeVoiceover(text, {
+            voiceId,
+            language,
+            usePremium: !!usePremium,
+        });
+
+        if (!voice) {
+            return NextResponse.json(
+                { error: "Synthesis failed on every provider. Check AZURE_SPEECH_KEY or ELEVEN_LABS_API_KEY." },
+                { status: 502 },
+            );
         }
 
-        // 2. Otherwise try Azure Cognitive Services first (Free Stack)
-        const azureAudio = await synthesizeWithAzure(text, language, voiceId);
-        if (azureAudio) {
-            console.log("[VoiceAPI] Successfully used Azure TTS");
-            return NextResponse.json({ audioUrl: azureAudio });
-        }
-
-        // 3. Fallback to ElevenLabs / Basic Stack
-        const audioUrl = await synthesizeSpeech(text, voiceId, language);
-        
-        return NextResponse.json({ audioUrl });
+        return NextResponse.json({ audioUrl: voice.path, words: voice.words });
     } catch (error) {
-        console.error("API Voice synthesis failed:", error);
+        console.error("[api/voice/generate] failed:", error);
         return NextResponse.json({ error: "Synthesis failed" }, { status: 500 });
     }
 }

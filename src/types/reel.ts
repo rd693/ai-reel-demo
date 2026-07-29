@@ -22,6 +22,14 @@ export type ReelScene = {
     backgroundType?: "image" | "video";
     backgroundAssetId?: string;
     visualPrompt?: string;
+
+    /** Line spoken over this scene; drives both captions and scene length. */
+    narrationText?: string;
+
+    // Absolute position on the reel timeline, filled in once the voiceover
+    // exists and its word timings are known.
+    startMs?: number;
+    endMs?: number;
 };
 
 export type ReelData = {

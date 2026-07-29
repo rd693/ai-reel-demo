@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2, Loader2, Video, Share2, Sparkles, Palette, Type, Check, Download, Trash2, Clock, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
-import { seriesStore } from "@/lib/series/seriesStore";
+import { seriesStore, type RenderJob } from "@/lib/series/seriesStore";
 import { Series, FacelessReel } from "@/types/series";
 import { createTimeline } from "@/agents/timelineAgent";
 
@@ -18,7 +18,7 @@ export default function ReelDetailPage() {
 
     const [reel, setReel] = useState<FacelessReel | null>(null);
     const [series, setSeries] = useState<Series | null>(null);
-    const [renderingStatus, setRenderingStatus] = useState<{ progress: number; status: string; downloadUrl?: string } | null>(null);
+    const [renderingStatus, setRenderingStatus] = useState<Partial<RenderJob> | null>(null);
     const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
 
     const [assetsLoaded, setAssetsLoaded] = useState(false);
@@ -134,35 +134,42 @@ export default function ReelDetailPage() {
         setRenderingStatus({ progress: 0, status: 'processing' });
 
         try {
-            const response = await fetch('/api/render', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reelId: reel.id, reelData: reel })
-            });
-
-            if (!response.ok) throw new Error("Render request failed");
-
-            const pollInterval = setInterval(async () => {
-                try {
-                    const statusRes = await fetch(`/api/render?reelId=${reel.id}`);
-                    const statusData = await statusRes.json();
-
-                    setRenderingStatus(statusData);
-
-                    if (statusData.status === 'completed' || statusData.status === 'failed') {
-                        clearInterval(pollInterval);
-                    }
-                } catch (e) {
-                    console.error("Polling failed", e);
-                    clearInterval(pollInterval);
-                }
-            }, 2000);
-
+            // The server reads the reel from the database, so the render always
+            // matches what was saved rather than whatever this tab holds.
+            await seriesStore.startRender(reel.id);
         } catch (error) {
             console.error("Failed to start render", error);
-            setRenderingStatus({ progress: 0, status: 'failed' });
+            setRenderingStatus({
+                progress: 0,
+                status: 'failed',
+                error: error instanceof Error ? error.message : undefined,
+            });
         }
     };
+
+    // Render progress lives in the database, so polling picks up a job that was
+    // started before this page was even opened.
+    const renderInFlight = renderingStatus?.status === 'processing' || renderingStatus?.status === 'queued';
+
+    useEffect(() => {
+        if (!reel?.id) return;
+
+        let cancelled = false;
+        const poll = async () => {
+            try {
+                const job = await seriesStore.getRenderJob(reel.id!);
+                if (!cancelled && job) setRenderingStatus(job);
+            } catch {
+                // Ignore a dropped poll; the next tick retries.
+            }
+        };
+
+        void poll(); // Surface an already-running job on first load.
+        if (!renderInFlight) return;
+
+        const timer = setInterval(poll, 2000);
+        return () => { cancelled = true; clearInterval(timer); };
+    }, [reel?.id, renderInFlight]);
 
     const handleDelete = async () => {
         if (!series || !reel || !reel.id) return;
@@ -304,9 +311,9 @@ export default function ReelDetailPage() {
                             </>
                         )}
                     </button>
-                    {renderingStatus?.downloadUrl && (
+                    {renderingStatus?.outputPath && (
                         <a
-                            href={renderingStatus.downloadUrl}
+                            href={renderingStatus.outputPath}
                             download={`reel-${reel.id}.mp4`}
                             className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-4 py-3 rounded-xl transition-colors font-bold flex items-center gap-2 text-sm border border-indigo-100"
                         >
@@ -391,9 +398,9 @@ export default function ReelDetailPage() {
                                 )}
                             </button>
 
-                            {renderingStatus?.downloadUrl && (
+                            {renderingStatus?.outputPath && (
                                 <a
-                                    href={renderingStatus.downloadUrl}
+                                    href={renderingStatus.outputPath}
                                     download={`reel-${reel.id}.mp4`}
                                     className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-3 shadow-xl"
                                 >

@@ -11,11 +11,10 @@ import type { ReelScene, UGCSceneType } from "../../types/reel";
 // that crosses this boundary gets decoded here so the rest of the app keeps
 // working with real types instead of strings.
 
-export type PersistedScene = ReelScene & {
-    narrationText?: string;
-    startMs?: number;
-    endMs?: number;
-};
+// Narration and timeline fields now live on ReelScene itself, since they are
+// columns rather than pipeline-only extras. Kept as an alias so the repos read
+// clearly about what they persist.
+export type PersistedScene = ReelScene;
 
 export type SeriesWithReels = SeriesRow & {
     reels?: (ReelRow & { scenes?: SceneRow[] })[];
