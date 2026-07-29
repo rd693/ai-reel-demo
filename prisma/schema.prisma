@@ -1,0 +1,148 @@
+// Persistence for the reel factory.
+//
+// Replaces the previous split-brain storage: localStorage for series/reels
+// (which silently evicted the oldest reels at the 5MB quota) and
+// data/reels.json for the preset pipeline.
+//
+// Two rules this schema enforces by shape:
+//   1. Media is referenced by PATH, never inlined. Base64 data URLs in
+//      localStorage were what blew the quota.
+//   2. Render jobs are rows, not an in-memory object, so they survive restarts.
+//
+// SQLite has no enums or array columns. Unions are stored as String and
+// structured values as JSON text; the accessor layer in src/lib/db does the
+// encoding so callers still work with real types.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Series {
+  id     String @id @default(uuid())
+  name   String
+  niche  String
+  status String @default("active") // active | paused
+
+  // Generation defaults inherited by each reel in the series
+  artStyle             String
+  voiceId              String
+  language             String  @default("english")
+  targetDuration       Int     @default(60) // seconds
+  frequency            String  @default("manual") // daily | weekly | manual
+  usePremiumImageStack Boolean @default(false)
+  seriesContext        String?
+  visualStylePrompt    String?
+
+  targetPlatforms String @default("[]") // JSON: ("tiktok"|"instagram"|"youtube")[]
+  musicSettings   String // JSON: { enabled, trackId, volume }
+  captionStyle    String // JSON: { type, animation, color, fontSize, fontFamily, boxEnabled, yOffset? }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reels Reel[]
+
+  @@index([status])
+}
+
+model Reel {
+  id       String @id @default(uuid())
+  seriesId String
+  series   Series @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  title  String
+  script String @default("")
+
+  brandColor  String @default("#6366f1")
+  accentColor String @default("#facc15")
+
+  // Per-reel overrides of the series defaults
+  language             String?
+  artStyle             String?
+  visualStyleOverride  String?
+  usePremiumImageStack Boolean @default(false)
+  seed                 Int?
+
+  // Path under public/, e.g. /voiceovers/voice-123.mp3 — never a data URL.
+  voiceoverPath    String?
+  actualDurationMs Int?
+  captionWords     String? // JSON: { word, start, end }[]
+
+  // pending | scripted | voicing | visualizing | rendering | completed | failed
+  generationStatus String  @default("pending")
+  generationError  String?
+
+  musicSettings String? // JSON, falls back to the series setting when null
+  captionStyle  String? // JSON, falls back to the series setting when null
+
+  scheduledFor DateTime?
+  publishedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  scenes     Scene[]
+  renderJobs RenderJob[]
+
+  @@index([seriesId])
+  @@index([generationStatus])
+  @@index([scheduledFor])
+}
+
+model Scene {
+  id     String @id @default(uuid())
+  reelId String
+  reel   Reel   @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  // Position in the reel. Scene order is explicit rather than implied by id.
+  index Int
+
+  type          String  @default("hook") // hook | problem | reaction | offer | proof | cta
+  headline      String
+  narrationText String?
+  visualPrompt  String?
+
+  backgroundPath String? // path under public/, or a remote URL for generated images
+  backgroundType String? @default("image") // image | video
+
+  durationInSeconds Float @default(3)
+
+  // Absolute timeline position, set once voiceover timings are known.
+  startMs Int?
+  endMs   Int?
+
+  @@unique([reelId, index])
+  @@index([reelId])
+}
+
+model RenderJob {
+  id     String @id @default(uuid())
+  reelId String
+  reel   Reel   @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  status   String @default("queued") // queued | processing | completed | failed
+  progress Int    @default(0) // 0-100
+
+  outputPath String? // path under public/, e.g. /renders/<reelId>/<id>.mp4
+  error      String?
+
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  @@index([reelId])
+  @@index([status])
+}
+
+model Asset {
+  id       String @id @default(uuid())
+  fileName String
+  url      String
+  type     String @default("image") // image | video
+
+  createdAt DateTime @default(now())
+}

@@ -75,10 +75,12 @@ export default function NewSeriesPage() {
 
     const [previewContent, setPreviewContent] = useState<any>(null);
 
-    const handleLaunch = () => {
+    const [launching, setLaunching] = useState(false);
+    const [launchError, setLaunchError] = useState<string | null>(null);
+
+    const handleLaunch = async () => {
         const newSeries: Series = {
             id: uuidv4(),
-            userId: "u1",
             name: formData.name,
             niche: formData.niche,
             artStyle: formData.artStyle,
@@ -106,8 +108,16 @@ export default function NewSeriesPage() {
             reels: [],
             createdAt: new Date()
         };
-        seriesStore.save(newSeries);
-        router.push("/dashboard/series");
+        setLaunching(true);
+        setLaunchError(null);
+        try {
+            await seriesStore.create(newSeries);
+            router.push("/dashboard/series");
+        } catch (e) {
+            // Stay on the form so the filled-in settings are not lost.
+            setLaunchError(e instanceof Error ? e.message : "Failed to create series");
+            setLaunching(false);
+        }
     };
 
     const handleGeneratePreview = async () => {
@@ -454,12 +464,16 @@ export default function NewSeriesPage() {
                             <button onClick={() => setStep(4)} className="flex-1 bg-slate-100 text-slate-700 py-4 rounded-xl font-bold">Back</button>
                             <button
                                 onClick={handleLaunch}
-                                className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-xl font-bold transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-2"
+                                disabled={launching}
+                                className="flex-[2] bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-2"
                             >
                                 <Globe size={20} />
-                                Launch Series
+                                {launching ? "Creating…" : "Launch Series"}
                             </button>
                         </div>
+                        {launchError && (
+                            <p className="mt-3 text-sm text-red-600 text-center">{launchError}</p>
+                        )}
                     </div>
                 )}
             </div>

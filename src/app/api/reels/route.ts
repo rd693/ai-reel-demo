@@ -1,23 +1,18 @@
 import { NextResponse } from "next/server";
-import { reelFileStore } from "../../../lib/reel/reelFileStore";
+import { prisma } from "@/lib/db/client";
+import { toReel } from "@/lib/db/mappers";
 
+// Every reel across all series, newest first. Creating a reel is scoped to its
+// series and lives at POST /api/series/[id]/reels.
 export async function GET() {
-  try {
-    const reels = await reelFileStore.getAllReels();
-    return NextResponse.json(reels);
-  } catch (error) {
-    console.error("Failed to fetch reels:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    const reel = await request.json();
-    await reelFileStore.saveReel(reel);
-    return NextResponse.json(reel, { status: 201 });
-  } catch (error) {
-    console.error("Failed to save reel:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-  }
+    try {
+        const rows = await prisma.reel.findMany({
+            orderBy: { createdAt: "desc" },
+            include: { scenes: { orderBy: { index: "asc" } } },
+        });
+        return NextResponse.json(rows.map(toReel));
+    } catch (error) {
+        console.error("[api/reels] list failed:", error);
+        return NextResponse.json({ error: "Failed to load reels" }, { status: 500 });
+    }
 }

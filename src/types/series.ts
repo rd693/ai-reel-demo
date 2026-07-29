@@ -22,7 +22,6 @@ export type ArtStyle =
 
 export interface Series {
     id: string;
-    userId: string;
     name: string;
     niche: NicheType;
     artStyle: ArtStyle;

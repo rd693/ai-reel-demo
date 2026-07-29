@@ -1,130 +1,90 @@
 import { Series, FacelessReel } from "../../types/series";
 
-const STORAGE_KEY = "faceless_reels_series";
+// Was a localStorage store. That capped everything at the ~5MB quota and, once
+// full, silently dropped the oldest reels to make room (base64 voiceovers ate
+// it fast). It is now a thin client over the SQLite-backed API; every method
+// is async as a result.
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+    const res = await fetch(url, {
+        ...init,
+        headers: init?.body ? { "Content-Type": "application/json" } : undefined,
+    });
+
+    if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        throw new Error(detail?.error ?? `Request failed: ${res.status} ${url}`);
+    }
+
+    return res.json() as Promise<T>;
+}
 
 export const seriesStore = {
-    getAll: (): Series[] => {
-        if (typeof window === "undefined") return [];
-        const saved = localStorage.getItem(STORAGE_KEY);
-        const all: Series[] = saved ? JSON.parse(saved) : [
-            {
-                id: "s1",
-                userId: "u1",
-                name: "Ancient Mysteries",
-                niche: "mythology",
-                targetDuration: 60,
-                language: "english",
-                voiceId: "v1",
-                artStyle: "cinematic",
-                musicSettings: {
-                    enabled: true,
-                    trackId: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-                    volume: 0.5
-                },
-                captionStyle: {
-                    type: 'word',
-                    animation: 'pop',
-                    color: '#FFD700',
-                    fontSize: 120,
-                    fontFamily: 'Inter',
-                    boxEnabled: true
-                },
-                reels: [],
-                status: "active",
-                createdAt: new Date("2024-01-01")
-            }
-        ];
-        
-        return all.sort((a, b) => 
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
+    /** All series, newest first. Does not include reels. */
+    getAll(): Promise<Series[]> {
+        return request<Series[]>("/api/series");
     },
 
-    save: (series: Series) => {
-        const all = seriesStore.getAll();
-        const updated = [...all, series];
-        safeSetItem(STORAGE_KEY, JSON.stringify(updated));
+    /** A single series including its reels and their scenes. */
+    async getById(id: string): Promise<Series | null> {
+        const res = await fetch(`/api/series/${id}`);
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error("Failed to load series");
+        return res.json();
     },
 
-    update: (series: Series) => {
-        const all = seriesStore.getAll();
-        const updated = all.map(s => s.id === series.id ? series : s);
-        safeSetItem(STORAGE_KEY, JSON.stringify(updated));
+    create(series: Omit<Series, "createdAt" | "reels"> & Partial<Series>): Promise<Series> {
+        return request<Series>("/api/series", {
+            method: "POST",
+            body: JSON.stringify(series),
+        });
     },
 
-    updateSeries: (id: string, series: Series) => {
-        seriesStore.update(series);
+    update(id: string, patch: Partial<Series>): Promise<Series> {
+        return request<Series>(`/api/series/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify(patch),
+        });
     },
 
-    toggleStatus: (id: string): Series[] => {
-        const all = seriesStore.getAll();
-        const updated: Series[] = all.map(s => s.id === id ? { ...s, status: (s.status === "active" ? "paused" : "active") as "active" | "paused" } : s);
-        safeSetItem(STORAGE_KEY, JSON.stringify(updated));
-        return updated;
+    /** Server-side flip, so two rapid clicks cannot both read "active". */
+    toggleStatus(id: string): Promise<Series> {
+        return request<Series>(`/api/series/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ toggleStatus: true }),
+        });
     },
 
-    deleteSeries: (id: string) => {
-        const all = seriesStore.getAll();
-        const updated = all.filter(s => s.id !== id);
-        safeSetItem(STORAGE_KEY, JSON.stringify(updated));
-        localStorage.removeItem(`reels_${id}`);
-        return updated;
+    async deleteSeries(id: string): Promise<void> {
+        await request(`/api/series/${id}`, { method: "DELETE" });
     },
 
-    getReelsForSeries: (seriesId: string): FacelessReel[] => {
-        if (typeof window === "undefined") return [];
-        const saved = localStorage.getItem(`reels_${seriesId}`);
-        return saved ? JSON.parse(saved) : [];
+    getReelsForSeries(seriesId: string): Promise<FacelessReel[]> {
+        return request<FacelessReel[]>(`/api/series/${seriesId}/reels`);
     },
 
-    saveReel: (seriesId: string, reel: FacelessReel) => {
-        const key = `reels_${seriesId}`;
-        const all = seriesStore.getReelsForSeries(seriesId);
-        let updated = [reel, ...all];
-        
-        try {
-            localStorage.setItem(key, JSON.stringify(updated));
-        } catch (e) {
-            console.warn("[SeriesStore] Storage quota exceeded. Evicting oldest reels...");
-            // Keep trying to save by removing the oldest reel until it fits
-            while (updated.length > 1) {
-                updated.pop(); // Remove oldest
-                try {
-                    localStorage.setItem(key, JSON.stringify(updated));
-                    console.log(`[SeriesStore] Successfully saved after evicting old data. Current count: ${updated.length}`);
-                    return;
-                } catch (err) {
-                    continue;
-                }
-            }
-            console.error("[SeriesStore] Could not save even after eviction. Data too large.");
-        }
+    saveReel(seriesId: string, reel: Partial<FacelessReel>): Promise<FacelessReel> {
+        return request<FacelessReel>(`/api/series/${seriesId}/reels`, {
+            method: "POST",
+            body: JSON.stringify(reel),
+        });
     },
 
-    deleteReel: (seriesId: string, reelId: string) => {
-        const key = `reels_${seriesId}`;
-        const all = seriesStore.getReelsForSeries(seriesId);
-        const updated = all.filter(r => r.id !== reelId);
-        safeSetItem(key, JSON.stringify(updated));
-        return updated;
+    async getReel(reelId: string): Promise<FacelessReel | null> {
+        const res = await fetch(`/api/reels/${reelId}`);
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error("Failed to load reel");
+        return res.json();
     },
-    
-    updateReel: (seriesId: string, reel: FacelessReel) => {
-        const key = `reels_${seriesId}`;
-        const all = seriesStore.getReelsForSeries(seriesId);
-        const updated = all.map(r => r.id === reel.id ? reel : r);
-        safeSetItem(key, JSON.stringify(updated));
-    }
+
+    updateReel(reelId: string, patch: Partial<FacelessReel>): Promise<FacelessReel> {
+        return request<FacelessReel>(`/api/reels/${reelId}`, {
+            method: "PATCH",
+            body: JSON.stringify(patch),
+        });
+    },
+
+    async deleteReel(reelId: string): Promise<void> {
+        await request(`/api/reels/${reelId}`, { method: "DELETE" });
+    },
 };
-
-/**
- * Robust wrapper for localStorage.setItem with error handling
- */
-function safeSetItem(key: string, value: string) {
-    try {
-        localStorage.setItem(key, value);
-    } catch (e) {
-        console.error(`[SeriesStore] Failed to save to ${key}:`, e);
-        // If the main series list is full, we have a bigger problem, but we should at least not crash
-    }
-}

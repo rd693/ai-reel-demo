@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Play, Pause, Layers, Trash2, ChevronRight, Film, Clock, FolderOpen } from "lucide-react";
+import { Plus, Play, Pause, Layers, Trash2, ChevronRight, Film, Clock, FolderOpen, Loader2 } from "lucide-react";
 import { seriesStore } from "../../../lib/series/seriesStore";
 import { Series, NicheType } from "../../../types/series";
+import { countLegacySeries, importLegacyData } from "../../../lib/series/legacyImport";
 
 const NICHE_LABELS: Record<NicheType, string> = {
     mythology: "Mythology",
@@ -32,19 +33,72 @@ function sortNewestFirst(arr: Series[]) {
 
 export default function SeriesDashboardPage() {
     const [series, setSeries] = useState<Series[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
-        setSeries(sortNewestFirst(seriesStore.getAll()));
+    const refresh = useCallback(async () => {
+        try {
+            setSeries(sortNewestFirst(await seriesStore.getAll()));
+            setError(null);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Failed to load series");
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    const handleToggle = (id: string) => {
-        setSeries(sortNewestFirst(seriesStore.toggleStatus(id)));
+    useEffect(() => {
+        void refresh();
+    }, [refresh]);
+
+    // Data created before the SQLite migration still lives in this browser.
+    const [legacyCount, setLegacyCount] = useState(0);
+    const [importing, setImporting] = useState(false);
+    const [importNote, setImportNote] = useState<string | null>(null);
+
+    useEffect(() => {
+        setLegacyCount(countLegacySeries());
+    }, []);
+
+    const handleImport = async () => {
+        setImporting(true);
+        try {
+            const { imported, skipped } = await importLegacyData();
+            setImportNote(
+                `Imported ${imported.series} series and ${imported.reels} reels` +
+                    (skipped.length ? ` (${skipped.length} already present)` : "") + ".",
+            );
+            setLegacyCount(0);
+            await refresh();
+        } catch (e) {
+            setImportNote(e instanceof Error ? e.message : "Import failed");
+        } finally {
+            setImporting(false);
+        }
     };
 
-    const handleDelete = (id: string) => {
-        if (confirm("Delete this series and all its reels?")) {
-            setSeries(sortNewestFirst(seriesStore.deleteSeries(id)));
+    const handleToggle = async (id: string) => {
+        // Reflect the flip immediately, then reconcile with what the server saved.
+        setSeries((current) =>
+            current.map((s) =>
+                s.id === id ? { ...s, status: s.status === "active" ? "paused" : "active" } : s,
+            ),
+        );
+        try {
+            await seriesStore.toggleStatus(id);
+        } finally {
+            void refresh();
         }
+    };
+
+    const handleDelete = async (id: string) => {
+        if (!confirm("Delete this series and all its reels?")) return;
+        try {
+            await seriesStore.deleteSeries(id);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Failed to delete series");
+        }
+        void refresh();
     };
 
     return (
@@ -73,8 +127,42 @@ export default function SeriesDashboardPage() {
                 </div>
             </div>
 
-            {/* Empty state */}
-            {series.length === 0 ? (
+            {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 mb-4 text-sm">
+                    {error}
+                </div>
+            )}
+
+            {legacyCount > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-4">
+                    <p className="text-amber-800 text-sm">
+                        Found <strong>{legacyCount}</strong> series saved in this browser from before
+                        the database migration. Import them to keep them.
+                    </p>
+                    <button
+                        onClick={handleImport}
+                        disabled={importing}
+                        className="bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-colors"
+                    >
+                        {importing ? "Importing…" : "Import now"}
+                    </button>
+                </div>
+            )}
+
+            {importNote && (
+                <div className="bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 mb-4 text-sm">
+                    {importNote}
+                </div>
+            )}
+
+            {/* Series load over the network now, so an explicit loading state
+                keeps the empty state from flashing on every visit. */}
+            {loading ? (
+                <div className="bg-white rounded-2xl border border-slate-200 p-16 text-center shadow-sm">
+                    <Loader2 size={32} className="mx-auto text-slate-300 mb-3 animate-spin" />
+                    <p className="text-slate-500 text-sm">Loading series…</p>
+                </div>
+            ) : series.length === 0 ? (
                 <div className="bg-white rounded-2xl border border-slate-200 p-16 text-center shadow-sm">
                     <Layers size={48} className="mx-auto text-slate-300 mb-4" />
                     <h3 className="text-lg font-bold text-slate-900">No series yet</h3>

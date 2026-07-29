@@ -6,6 +6,8 @@
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.9.1",
+    "@prisma/client": "^7.9.1",
     "@remotion/bundler": "^4.0.454",
     "@remotion/cli": "4.0.454",
     "@remotion/player": "^4.0.454",
@@ -28,8 +30,10 @@
     "@types/react": "19.2.7",
     "@types/uuid": "^10.0.0",
     "@types/web": "0.0.166",
+    "dotenv": "^17.4.2",
     "eslint": "9.19.0",
     "prettier": "3.8.1",
+    "prisma": "^7.9.1",
     "typescript": "5.9.3"
   },
   "scripts": {
@@ -39,7 +43,11 @@
     "studio": "remotion studio",
     "remotion-build": "remotion bundle",
     "upgrade": "remotion upgrade",
-    "lint": "eslint src && tsc"
+    "lint": "eslint src && tsc",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio"
   },
   "sideEffects": [
     "*.css"

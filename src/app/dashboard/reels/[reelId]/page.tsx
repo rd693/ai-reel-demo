@@ -105,22 +105,27 @@ export default function ReelDetailPage() {
 
 
     useEffect(() => {
-        // Find the reel across all series
-        const allSeries = seriesStore.getAll();
-        for (const s of allSeries) {
-            const reels = seriesStore.getReelsForSeries(s.id);
-            const foundReel = reels.find(r => r.id === reelId);
-            if (foundReel) {
-                // ✅ Migrate: Ensure old reels get a seed for consistency
-                if (!(foundReel as any).seed) {
-                    (foundReel as any).seed = Math.floor(Math.random() * 2147483647);
-                    seriesStore.updateReel(s.id, foundReel);
-                }
-                setReel(foundReel);
-                setSeries(s);
-                break;
+        let cancelled = false;
+
+        (async () => {
+            // Reels are addressable by id, so this is a direct lookup rather
+            // than a scan of every series' reels.
+            const found = await seriesStore.getReel(reelId);
+            if (cancelled || !found) return;
+
+            // Older reels predate seeded image generation; give them one so
+            // regenerating a single scene stays visually consistent.
+            if (!found.seed) {
+                found.seed = Math.floor(Math.random() * 2147483647);
+                await seriesStore.updateReel(reelId, { seed: found.seed });
             }
-        }
+
+            if (cancelled) return;
+            setReel(found);
+            setSeries(await seriesStore.getById(found.seriesId));
+        })();
+
+        return () => { cancelled = true; };
     }, [reelId]);
 
     const handleRenderReel = async () => {
@@ -159,23 +164,30 @@ export default function ReelDetailPage() {
         }
     };
 
-    const handleDelete = () => {
+    const handleDelete = async () => {
         if (!series || !reel || !reel.id) return;
-        if (confirm("Are you sure you want to delete this reel?")) {
-            seriesStore.deleteReel(series.id, reel.id);
+        if (!confirm("Are you sure you want to delete this reel?")) return;
+        try {
+            await seriesStore.deleteReel(reel.id);
             router.push(`/dashboard/series/${series.id}`);
+        } catch (e) {
+            alert(e instanceof Error ? e.message : "Failed to delete reel");
         }
     };
 
     const handlePromptChange = (index: number, newPrompt: string) => {
-        if (!reel || !series) return;
-        
+        if (!reel || !reel.id) return;
+
         const updatedScenes = [...reel.scenes];
         updatedScenes[index] = { ...updatedScenes[index], visualPrompt: newPrompt };
-        
+
         const updatedReel = { ...reel, scenes: updatedScenes };
         setReel(updatedReel);
-        seriesStore.updateReel(series.id, updatedReel);
+        // Typing in the prompt box fires this per keystroke; persistence is
+        // fire-and-forget so the field stays responsive.
+        void seriesStore.updateReel(reel.id, { scenes: updatedScenes }).catch((e) =>
+            console.error("Failed to persist prompt change", e),
+        );
     };
 
     const handleRegenerate = async (index: number) => {
@@ -213,8 +225,8 @@ export default function ReelDetailPage() {
             
             const updatedReel = { ...reel, scenes: updatedScenes };
             setReel(updatedReel);
-            seriesStore.updateReel(series.id, updatedReel);
-            
+            await seriesStore.updateReel(reel.id!, { scenes: updatedScenes });
+
         } catch (error) {
             console.error("Regeneration failed", error);
             alert("Failed to regenerate image. Please try again.");

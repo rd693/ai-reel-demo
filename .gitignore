@@ -22,6 +22,13 @@ public/uploads
 # Leading slash matters: an unanchored "data" would also swallow src/data.
 /data
 
+# SQLite database. Schema lives in prisma/migrations and is tracked; the
+# database itself is local state — rebuild it with `npm run db:deploy`.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
 # Editor / OS
 .idea
 .DS_Store
@@ -62,3 +69,5 @@ public/uploads
 npm-debug.log*
 yarn-error.log*
 scratch_*.ts
+
+/src/generated/prisma

@@ -60,9 +60,11 @@ export default function SeriesDetailPage() {
     const [visualStyleOverride, setVisualStyleOverride] = useState('');
 
     useEffect(() => {
-        const allSeries = seriesStore.getAll();
-        const found = allSeries.find(s => s.id === seriesId);
-        if (found) {
+        let cancelled = false;
+
+        (async () => {
+            const found = await seriesStore.getById(seriesId);
+            if (cancelled || !found) return;
             const enrichedSeries: Series = {
                 ...found,
                 language: found.language || "english",
@@ -87,18 +89,24 @@ export default function SeriesDetailPage() {
             setSeries(enrichedSeries);
             setTempSeries(enrichedSeries);
             setGenNiche(enrichedSeries.niche || '');
-            const seriesReels = seriesStore.getReelsForSeries(seriesId);
-            setReels(seriesReels.sort((a, b) => 
-                new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-            ));
-        }
+            // getById already returns reels ordered newest-first.
+            setReels(found.reels ?? []);
+        })();
+
+        return () => { cancelled = true; };
     }, [seriesId]);
 
-    const handleSaveSettings = () => {
+    const handleSaveSettings = async () => {
         if (!tempSeries) return;
-        seriesStore.updateSeries(seriesId, tempSeries);
-        setSeries(tempSeries);
-        setIsSettingsOpen(false);
+        try {
+            const saved = await seriesStore.update(seriesId, tempSeries);
+            setSeries(saved);
+            setTempSeries(saved);
+            setIsSettingsOpen(false);
+        } catch (e) {
+            console.error("Failed to save series settings", e);
+            alert(e instanceof Error ? e.message : "Failed to save settings");
+        }
     };
 
     const handleGenerate = async () => {
@@ -133,8 +141,10 @@ export default function SeriesDetailPage() {
                 captionStyle: series.captionStyle
             } as FacelessReel;
 
-            seriesStore.saveReel(seriesId, fullReel);
-            setReels(prev => [fullReel, ...prev]);
+            // Use the persisted row: it carries the server-assigned id that the
+            // reel detail page and render jobs are addressed by.
+            const saved = await seriesStore.saveReel(seriesId, fullReel);
+            setReels(prev => [saved, ...prev]);
         } catch (error) {
             console.error("Failed to generate reel", error);
             alert("Failed to generate. Check terminal for errors.");
@@ -388,10 +398,13 @@ export default function SeriesDetailPage() {
                                     Review &amp; Export
                                 </Link>
                                 <button
-                                    onClick={() => {
-                                        if (confirm("Delete this reel?")) {
-                                            const updated = seriesStore.deleteReel(seriesId, reel.id!);
-                                            setReels(updated);
+                                    onClick={async () => {
+                                        if (!confirm("Delete this reel?")) return;
+                                        try {
+                                            await seriesStore.deleteReel(reel.id!);
+                                            setReels(prev => prev.filter(r => r.id !== reel.id));
+                                        } catch (e) {
+                                            alert(e instanceof Error ? e.message : "Failed to delete reel");
                                         }
                                     }}
                                     className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border border-transparent hover:border-red-100"
