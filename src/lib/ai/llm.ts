@@ -755,9 +755,18 @@ function enrichWithSubject(
                 prompt = rebuildPromptFromNarration(scene.narrationText, subject, index);
             }
 
-            // Step 3 — Ensure subject name is present
-            if (!prompt.toLowerCase().includes(subject.toLowerCase())) {
-                prompt = `${subject}, ${prompt}`;
+            // Step 3 — Ensure subject name is present.
+            // The subject arrives in the reel's own language, so for a Hindi
+            // series it is Devanagari — and prepending it here put Hindi back
+            // into prompts that Step 1 had just stripped it out of, sending
+            // "महाराणा प्रताप, Maharana Pratap on horseback..." to an image
+            // model that only reads English.
+            const promptableSubject = sanitizeVisualPrompt(subject);
+            if (
+                promptableSubject &&
+                !prompt.toLowerCase().includes(promptableSubject.toLowerCase())
+            ) {
+                prompt = `${promptableSubject}, ${prompt}`;
             }
 
             // Step 4 — Inject camera angle if missing
@@ -820,7 +829,10 @@ function rebuildPromptFromNarration(
 ): string {
     const context = extractVisualContext(narration, subject);
     const angle = CAMERA_ANGLES[sceneIndex % CAMERA_ANGLES.length];
-    return `${subject}, ${context}, ${angle}`;
+    // Sanitised for the same reason as in enrichWithSubject: the subject is in
+    // the reel's language, and image models only read English.
+    const promptableSubject = sanitizeVisualPrompt(subject);
+    return [promptableSubject, context, angle].filter(Boolean).join(", ");
 }
 
 // ─────────────────────────────────────────────────────────────

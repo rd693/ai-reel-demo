@@ -249,8 +249,16 @@ export async function generateImage({
 
     if (pollinationsUrl) return pollinationsUrl;
 
-    const fallbackSeed = Math.floor(Math.random() * 1000);
-    return `https://picsum.photos/seed/${fallbackSeed}/${size.width}/${size.height}`;
+    // This used to return a random Picsum stock photo. That is not a fallback,
+    // it is a wrong answer wearing the costume of a right one: a reel about
+    // Maharana Pratap silently shipped a photograph of autumn leaves, and once
+    // the file was copied into /uploads nothing downstream could tell it from a
+    // real generation.
+    //
+    // Failing leaves the scene without an image instead. The pipeline records
+    // that ("N of M scenes have no image") and a retry regenerates only the
+    // missing ones — visibly degraded beats invisibly wrong.
+    throw new Error(`All image providers failed for: "${prompt?.slice(0, 60)}"`);
 }
 
 async function generateWithReelShorts(args: {
