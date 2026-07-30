@@ -4,6 +4,8 @@
  * To use this, add ELEVEN_LABS_API_KEY to your .env file
  */
 
+import { toLanguageCode } from "./transcribe";
+
 const ELEVEN_LABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
 export type ElevenLabsVoice = "antoni" | "bella" | "rachel" | "domi" | "elli" | "josh" | "arnold" | "adam" | "sam";
@@ -27,10 +29,15 @@ const VOICE_MAP: Record<string, string> = {
 
 const DEFAULT_VOICE = VOICE_MAP.storyteller;
 
-// Voices available to this account, fetched once per process.
-let accountVoices: { id: string; name: string }[] | null = null;
+/** Friendly names that should map to a female voice when one is available. */
+const FEMALE_VOICE_KEYS = new Set(["bella", "rachel", "sarah", "monika"]);
 
-async function getAccountVoices(apiKey: string): Promise<{ id: string; name: string }[]> {
+type AccountVoice = { id: string; name: string; language?: string; gender?: string };
+
+// Voices available to this account, fetched once per process.
+let accountVoices: AccountVoice[] | null = null;
+
+async function getAccountVoices(apiKey: string): Promise<AccountVoice[]> {
     if (accountVoices) return accountVoices;
     try {
         const res = await fetch("https://api.elevenlabs.io/v1/voices", {
@@ -38,10 +45,14 @@ async function getAccountVoices(apiKey: string): Promise<{ id: string; name: str
         });
         if (!res.ok) throw new Error(`voices lookup failed: ${res.status}`);
         const data = await res.json();
-        accountVoices = (data.voices ?? []).map((v: { voice_id: string; name: string }) => ({
-            id: v.voice_id,
-            name: v.name,
-        }));
+        accountVoices = (data.voices ?? []).map(
+            (v: { voice_id: string; name: string; labels?: Record<string, string> }) => ({
+                id: v.voice_id,
+                name: v.name,
+                language: v.labels?.language,
+                gender: v.labels?.gender,
+            }),
+        );
     } catch (e) {
         console.warn("[ElevenLabs] Could not list account voices:", e);
         accountVoices = [];
@@ -59,11 +70,35 @@ async function getAccountVoices(apiKey: string): Promise<{ id: string; name: str
 export async function resolveVoiceId(
     voiceId: string | undefined,
     apiKey: string,
+    language?: string,
 ): Promise<string> {
-    const requested = VOICE_MAP[(voiceId ?? "").toLowerCase()] ?? voiceId ?? DEFAULT_VOICE;
+    const key = (voiceId ?? "").toLowerCase();
+    const requested = VOICE_MAP[key] ?? voiceId ?? DEFAULT_VOICE;
 
     const voices = await getAccountVoices(apiKey);
     if (voices.length === 0) return requested; // Cannot verify — try it anyway.
+
+    // A non-English reel gets a voice native to that language when the account
+    // has one. eleven_multilingual_v2 will read Hindi with an English voice,
+    // but it carries an English accent — which is the whole thing a "faceless
+    // Hindi channel" cannot have. The original code hardcoded two Indian voice
+    // ids for this; they were retired and 404'd, so the match is made against
+    // the account's own list instead.
+    const langCode = toLanguageCode(language);
+    if (langCode && langCode !== "en") {
+        const natives = voices.filter((v) => v.language === langCode);
+        if (natives.length > 0) {
+            const wantFemale = FEMALE_VOICE_KEYS.has(key);
+            const match =
+                natives.find((v) => v.gender === (wantFemale ? "female" : "male")) ?? natives[0];
+            console.log(`[ElevenLabs] Using native ${langCode} voice "${match.name}" for ${language}.`);
+            return match.id;
+        }
+        console.warn(
+            `[ElevenLabs] No native ${langCode} voice on this account; "${voiceId}" will read ${language} with its own accent.`,
+        );
+    }
+
     if (voices.some((v) => v.id === requested)) return requested;
 
     const substitute =
@@ -99,10 +134,7 @@ export async function synthesizeSpeech(text: string, voiceId: string = "arnold",
         return "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjIzLjEwMgAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIwADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//OEAAAAAAAAAAAAAAAAAAAAAAAADExU0UAAAAGAAAAbGF2Zf//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     }
 
-    // eleven_multilingual_v2 speaks Hindi with any voice, so there is no
-    // language-specific routing; the two "native Indian" ids this used to
-    // switch to no longer exist and returned 404 for every Hindi reel.
-    const voiceGuid = await resolveVoiceId(voiceId, apiKey);
+    const voiceGuid = await resolveVoiceId(voiceId, apiKey, language);
 
     try {
         console.log(`[ElevenLabs] Synthesizing with model: eleven_multilingual_v2, Voice GUID: ${voiceGuid} (Voice: ${voiceId})`);
@@ -195,7 +227,7 @@ export async function synthesizeSpeechWithTimestamps(
         return null;
     }
 
-    const voiceGuid = await resolveVoiceId(voiceId, apiKey);
+    const voiceGuid = await resolveVoiceId(voiceId, apiKey, language);
 
     try {
         console.log(`[ElevenLabs] Synthesizing with timestamps. Voice GUID: ${voiceGuid} (Voice: ${voiceId})`);
