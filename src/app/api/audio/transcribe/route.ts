@@ -26,7 +26,7 @@ export async function POST(req: Request) {
         if (buffer.length < 100) {
             return NextResponse.json(
                 {
-                    error: "Audio synthesis failed. Verify AZURE_SPEECH_KEY or ELEVEN_LABS_API_KEY.",
+                    error: "Audio synthesis failed. Verify ELEVEN_LABS_API_KEY.",
                     details: `Received ${buffer.length}-byte placeholder audio.`,
                 },
                 { status: 400 },

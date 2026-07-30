@@ -1,5 +1,4 @@
 import { synthesizeSpeech, synthesizeSpeechWithTimestamps, type WordTimestamp } from "./elevenlabs";
-import { synthesizeWithAzure } from "./azureTTS";
 import { persistDataUrl } from "../media/persistDataUrl";
 
 export type Voiceover = {
@@ -22,43 +21,32 @@ export type Voiceover = {
 const MIN_VOICEOVER_BYTES = 4096;
 
 /**
- * Produces a voiceover file and, when the provider supports it, word timings.
+ * Produces a voiceover file and, when available, word timings.
  *
- * Provider order is unchanged (ElevenLabs-with-timestamps for premium, then
- * Azure, then plain ElevenLabs). Two things differ from the original: the
- * output is a file path rather than a base64 data URL, and a provider that
- * returns placeholder audio is treated as a failure so the next one is tried.
+ * ElevenLabs is the only provider. The timestamped endpoint is tried first
+ * because word timings drive caption sync and scene cuts directly; without them
+ * the pipeline falls back to estimating from punctuation, which drifts.
  *
- * Returns null when every provider fails, so the caller can fail the reel with
- * an actionable message instead of persisting silence that cannot be rendered.
+ * Output is a file path rather than a base64 data URL, and a provider that
+ * returns placeholder audio is treated as a failure rather than a success.
+ * Returns null when nothing usable came back, so the caller can fail the reel
+ * with an actionable message instead of persisting unrenderable silence.
  */
 export async function synthesizeVoiceover(
     text: string,
-    { voiceId = "storyteller", language = "english", usePremium = false } = {},
+    { voiceId = "storyteller", language = "english" } = {},
 ): Promise<Voiceover | null> {
     const persist = (audio: string) =>
         persistDataUrl(audio, "voiceovers", { minBytes: MIN_VOICEOVER_BYTES });
 
-    if (usePremium) {
-        const premium = await synthesizeSpeechWithTimestamps(text, voiceId, language);
-        if (premium?.audioUrl) {
-            const path = await persist(premium.audioUrl);
-            if (path) {
-                console.log(`[voice] ElevenLabs + timestamps (${premium.words.length} words)`);
-                return { path, words: premium.words ?? [] };
-            }
-        }
-        console.warn("[voice] Premium synthesis failed, falling back to the free stack");
-    }
-
-    const azure = await synthesizeWithAzure(text, language, voiceId);
-    if (azure) {
-        const path = await persist(azure);
+    const timestamped = await synthesizeSpeechWithTimestamps(text, voiceId, language);
+    if (timestamped?.audioUrl) {
+        const path = await persist(timestamped.audioUrl);
         if (path) {
-            console.log("[voice] Azure TTS");
-            return { path, words: [] };
+            console.log(`[voice] ElevenLabs + timestamps (${timestamped.words.length} words)`);
+            return { path, words: timestamped.words ?? [] };
         }
-        console.warn("[voice] Azure returned placeholder audio, trying ElevenLabs");
+        console.warn("[voice] Timestamped synthesis returned unusable audio, retrying plain");
     }
 
     const basic = await synthesizeSpeech(text, voiceId, language);
@@ -68,6 +56,6 @@ export async function synthesizeVoiceover(
         return { path, words: [] };
     }
 
-    console.error("[voice] Every provider returned unusable audio");
+    console.error("[voice] ElevenLabs returned unusable audio");
     return null;
 }

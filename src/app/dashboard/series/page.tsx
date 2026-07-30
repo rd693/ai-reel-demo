@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Play, Pause, Layers, Trash2, ChevronRight, Film, Clock, FolderOpen, Loader2 } from "lucide-react";
+import { Plus, Play, Pause, Layers, Trash2, ChevronRight, Film, Clock, FolderOpen, Loader2, CalendarClock } from "lucide-react";
 import { seriesStore } from "../../../lib/series/seriesStore";
 import { Series, NicheType } from "../../../types/series";
 import { countLegacySeries, importLegacyData } from "../../../lib/series/legacyImport";
@@ -50,6 +50,31 @@ export default function SeriesDashboardPage() {
     useEffect(() => {
         void refresh();
     }, [refresh]);
+
+    // Scheduler's own view of each series: whether it is due and when next.
+    // Read from the dry-run endpoint so the page shows the same verdict the
+    // worker will act on, rather than recomputing the rules in the client.
+    const [schedule, setSchedule] = useState<Record<string, { due: boolean; reason: string }>>({});
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const res = await fetch("/api/cron/tick");
+                if (!res.ok) return;
+                const data = await res.json();
+                setSchedule(
+                    Object.fromEntries(
+                        data.series.map((s: { id: string; due: boolean; reason: string }) => [
+                            s.id,
+                            { due: s.due, reason: s.reason },
+                        ]),
+                    ),
+                );
+            } catch {
+                // Schedule detail is supplementary; the list still works without it.
+            }
+        })();
+    }, [series]);
 
     // Data created before the SQLite migration still lives in this browser.
     const [legacyCount, setLegacyCount] = useState(0);
@@ -206,6 +231,21 @@ export default function SeriesDashboardPage() {
                                     </span>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 font-medium">
+                                    {/* What the scheduler intends to do with this series. */}
+                                    <span
+                                        className={`flex items-center gap-1 ${schedule[item.id]?.due ? "text-emerald-600" : ""}`}
+                                        title={schedule[item.id]?.reason ?? ""}
+                                    >
+                                        <CalendarClock size={11} />
+                                        {item.frequency === "manual"
+                                            ? "manual"
+                                            : schedule[item.id]
+                                              ? schedule[item.id].due
+                                                  ? `${item.frequency} · due now`
+                                                  : `${item.frequency} · ${schedule[item.id].reason}`
+                                              : item.frequency}
+                                    </span>
+                                    <span>·</span>
                                     <span className="capitalize">{item.artStyle.replace(/_/g, " ")}</span>
                                     <span>·</span>
                                     <span className="flex items-center gap-1">

@@ -9,21 +9,17 @@ import { synthesizeVoiceover } from "@/lib/audio/synthesizeVoiceover";
 // quota and bloated every reel row.
 export async function POST(req: Request) {
     try {
-        const { text, voiceId, language, usePremium } = await req.json();
+        const { text, voiceId, language } = await req.json();
 
         if (!text?.trim()) {
             return NextResponse.json({ error: "Text is required" }, { status: 400 });
         }
 
-        const voice = await synthesizeVoiceover(text, {
-            voiceId,
-            language,
-            usePremium: !!usePremium,
-        });
+        const voice = await synthesizeVoiceover(text, { voiceId, language });
 
         if (!voice) {
             return NextResponse.json(
-                { error: "Synthesis failed on every provider. Check AZURE_SPEECH_KEY or ELEVEN_LABS_API_KEY." },
+                { error: "Synthesis failed. Check ELEVEN_LABS_API_KEY." },
                 { status: 502 },
             );
         }

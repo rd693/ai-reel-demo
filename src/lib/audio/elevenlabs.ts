@@ -8,20 +8,74 @@ const ELEVEN_LABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
 export type ElevenLabsVoice = "antoni" | "bella" | "rachel" | "domi" | "elli" | "josh" | "arnold" | "adam" | "sam";
 
+// Friendly names are kept stable because they are stored on every Series row;
+// only the ids behind them changed. The previous ids were retired ElevenLabs v1
+// voices and every one returned 404 — including the UI default ("arnold") — so
+// no reel could ever get a voiceover.
 const VOICE_MAP: Record<string, string> = {
-    antoni: "ErXwryYJaP8VwTYLOAD4",
-    bella: "EXAVITQu4vr4xnSDxMaL",
-    rachel: "21m00Tcm4TlvDq8ikWAM",
+    antoni: "nPczCjzI2devNBz1zQrb", // Brian — deep, resonant
+    bella: "hpp4J3VqNfWAUOO0d1Us", // Bella — bright, warm
+    arnold: "pNInz6obpgDQGcFmaJgB", // Adam — dominant, firm
+    josh: "TX3LPaxmHKxFdv7VOQHJ", // Liam — energetic
+    storyteller: "JBFqnCBsd6RMkjVDRZzb", // George — warm storyteller
+    rachel: "EXAVITQu4vr4xnSDxMaL", // Sarah — mature, reassuring
     adam: "pNInz6obpgDQGcFmaJgB",
-    arnold: "VR6AewrYgfuFJJebXmC0",
-    sam: "yoZ06aL4AIZws1559Qvo", // Professional Narrator
-    josh: "TxGEqnSAs9auCw9LieRL",  // Deep Storyteller
-    storyteller: "TxGEqnSAs9auCw9LieRL", // Josh - deep storyteller
-    v1: "yoZ06aL4AIZws1559Qvo", // Sam - professional narrator
-    v2: "pNInz6obpgDQGcFmaJgB",  // Adam - deep voice
-    prem: "g5CIjZtFv3gu8tDkXv68",  // Prem - Premium Multilingual Indian Male
-    nisha: "ry24M5qnCXlsSpczMs4H" // Nisha - Premium Multilingual Indian Female
+    sam: "onwK4e9ZLuTAKqWW03F9", // Daniel — steady broadcaster
+    v1: "JBFqnCBsd6RMkjVDRZzb",
+    v2: "nPczCjzI2devNBz1zQrb",
 };
+
+const DEFAULT_VOICE = VOICE_MAP.storyteller;
+
+// Voices available to this account, fetched once per process.
+let accountVoices: { id: string; name: string }[] | null = null;
+
+async function getAccountVoices(apiKey: string): Promise<{ id: string; name: string }[]> {
+    if (accountVoices) return accountVoices;
+    try {
+        const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+            headers: { "xi-api-key": apiKey },
+        });
+        if (!res.ok) throw new Error(`voices lookup failed: ${res.status}`);
+        const data = await res.json();
+        accountVoices = (data.voices ?? []).map((v: { voice_id: string; name: string }) => ({
+            id: v.voice_id,
+            name: v.name,
+        }));
+    } catch (e) {
+        console.warn("[ElevenLabs] Could not list account voices:", e);
+        accountVoices = [];
+    }
+    return accountVoices!;
+}
+
+/**
+ * Turns a stored voice name into an id this account can actually use.
+ *
+ * Hardcoded ids rot: ElevenLabs retires voices, and a 404 at synthesis time is
+ * indistinguishable from a bad API key. Checking the account's own list turns
+ * that into a warning plus a working substitute instead of a dead pipeline.
+ */
+export async function resolveVoiceId(
+    voiceId: string | undefined,
+    apiKey: string,
+): Promise<string> {
+    const requested = VOICE_MAP[(voiceId ?? "").toLowerCase()] ?? voiceId ?? DEFAULT_VOICE;
+
+    const voices = await getAccountVoices(apiKey);
+    if (voices.length === 0) return requested; // Cannot verify — try it anyway.
+    if (voices.some((v) => v.id === requested)) return requested;
+
+    const substitute =
+        voices.find((v) => /storyteller|narrat/i.test(v.name)) ??
+        voices.find((v) => v.id === DEFAULT_VOICE) ??
+        voices[0];
+
+    console.warn(
+        `[ElevenLabs] Voice "${voiceId}" (${requested}) is not on this account; using "${substitute.name}".`,
+    );
+    return substitute.id;
+}
 
 export async function synthesizeSpeech(text: string, voiceId: string = "arnold", language: string = "english"): Promise<string> {
     const apiKey = process.env.ELEVEN_LABS_API_KEY;
@@ -45,16 +99,10 @@ export async function synthesizeSpeech(text: string, voiceId: string = "arnold",
         return "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjIzLjEwMgAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIwADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//OEAAAAAAAAAAAAAAAAAAAAAAAADExU0UAAAAGAAAAbGF2Zf//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     }
 
-    let voiceGuid = VOICE_MAP[voiceId] || VOICE_MAP.arnold;
-
-    // ✅ If language is Hindi, automatically route to premium native Indian voices (Prem for Male, Nisha for Female)
-    if (language.toLowerCase() === "hindi") {
-        const isFemale = ["bella", "rachel", "nisha"].includes(voiceId.toLowerCase());
-        voiceGuid = isFemale 
-            ? "ry24M5qnCXlsSpczMs4H" // Nisha (Native Indian Female)
-            : "g5CIjZtFv3gu8tDkXv68"; // Prem (Native Indian Male)
-        console.log(`[ElevenLabs] Auto-routing Hindi language to native Indian voice: ${isFemale ? 'Nisha' : 'Prem'}`);
-    }
+    // eleven_multilingual_v2 speaks Hindi with any voice, so there is no
+    // language-specific routing; the two "native Indian" ids this used to
+    // switch to no longer exist and returned 404 for every Hindi reel.
+    const voiceGuid = await resolveVoiceId(voiceId, apiKey);
 
     try {
         console.log(`[ElevenLabs] Synthesizing with model: eleven_multilingual_v2, Voice GUID: ${voiceGuid} (Voice: ${voiceId})`);
@@ -147,20 +195,14 @@ export async function synthesizeSpeechWithTimestamps(
         return null;
     }
 
-    let voiceGuid = VOICE_MAP[voiceId] || VOICE_MAP.arnold;
-
-    // ✅ If language is Hindi, automatically route to premium native Indian voices (Prem for Male, Nisha for Female)
-    if (language.toLowerCase() === "hindi") {
-        const isFemale = ["bella", "rachel", "nisha"].includes(voiceId.toLowerCase());
-        voiceGuid = isFemale 
-            ? "ry24M5qnCXlsSpczMs4H" // Nisha (Native Indian Female)
-            : "g5CIjZtFv3gu8tDkXv68"; // Prem (Native Indian Male)
-        console.log(`[ElevenLabs] Auto-routing Hindi language to native Indian voice with timestamps: ${isFemale ? 'Nisha' : 'Prem'}`);
-    }
+    const voiceGuid = await resolveVoiceId(voiceId, apiKey);
 
     try {
         console.log(`[ElevenLabs] Synthesizing with timestamps. Voice GUID: ${voiceGuid} (Voice: ${voiceId})`);
-        const response = await fetch(`${ELEVEN_LABS_API_URL}/${voiceGuid}/stream-with-timestamps`, {
+        // The path is "stream/with-timestamps", not "stream-with-timestamps".
+        // The hyphenated form 404s, which silently cost every reel its word
+        // timings and pushed captions onto punctuation-based estimation.
+        const response = await fetch(`${ELEVEN_LABS_API_URL}/${voiceGuid}/stream/with-timestamps`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -179,7 +221,7 @@ export async function synthesizeSpeechWithTimestamps(
         });
 
         if (!response.ok) {
-            throw new Error(`ElevenLabs stream-with-timestamps failed: ${response.statusText}`);
+            throw new Error(`ElevenLabs with-timestamps failed: ${response.statusText}`);
         }
 
         const reader = response.body;

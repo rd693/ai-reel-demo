@@ -118,12 +118,9 @@ export async function generateReel(reelId: string, options: GenerateOptions = {}
             const voice = await synthesizeVoiceover(current.script, {
                 voiceId: series.voiceId,
                 language,
-                usePremium,
             });
             if (!voice) {
-                throw new Error(
-                    "Voice synthesis failed on every provider. Check AZURE_SPEECH_KEY or ELEVEN_LABS_API_KEY.",
-                );
+                throw new Error("Voice synthesis failed. Check ELEVEN_LABS_API_KEY.");
             }
 
             await reelRepo.update(reelId, { voiceoverUrl: voice.path });

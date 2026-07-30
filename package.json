@@ -34,6 +34,7 @@
     "eslint": "9.19.0",
     "prettier": "3.8.1",
     "prisma": "^7.9.1",
+    "tsx": "^4.23.1",
     "typescript": "5.9.3"
   },
   "scripts": {
@@ -47,7 +48,8 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "worker": "tsx scripts/worker.ts"
   },
   "sideEffects": [
     "*.css"
