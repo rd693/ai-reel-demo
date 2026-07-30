@@ -1,7 +1,25 @@
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
+import fs from "fs";
+import os from "os";
 import path from "path";
 import { FacelessReel } from "../../types/series";
+
+/**
+ * An empty directory handed to Remotion as its public folder.
+ *
+ * Remotion copies the public directory into every bundle. Ours holds the
+ * rendered MP4s, so each render was duplicating the entire back catalogue —
+ * 1.4GB per bundle, several left behind in temp, until the disk filled and
+ * rendering failed with ENOSPC. Nothing in the composition uses staticFile();
+ * every asset arrives as an absolute URL built from baseHost, so Remotion needs
+ * no public directory at all.
+ */
+function emptyPublicDir(): string {
+    const dir = path.join(os.tmpdir(), "reel-factory-empty-public");
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+}
 
 type RenderReelOptions = {
     reelId: string;
@@ -19,7 +37,10 @@ let bundlePromise: Promise<string> | null = null;
 function getBundle(): Promise<string> {
     if (!bundlePromise) {
         console.log("[Remotion] Bundling project (first render)...");
-        bundlePromise = bundle(path.join(process.cwd(), "src/index.ts")).catch((err) => {
+        bundlePromise = bundle({
+            entryPoint: path.join(process.cwd(), "src/index.ts"),
+            publicDir: emptyPublicDir(),
+        }).catch((err) => {
             // Never cache a failed bundle, or every later render inherits it.
             bundlePromise = null;
             throw err;

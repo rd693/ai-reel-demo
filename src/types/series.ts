@@ -39,7 +39,9 @@ export interface Series {
     visualStylePrompt?: string; // ✅ Series-level visual style
     usePremiumImageStack?: boolean; // ✅ Paid/Free stack toggle
     captionStyle: {
-        type: 'word' | 'double' | 'sentence';
+        // Canonical values. Older rows may hold "double"/"split"/"line";
+        // normalizeCaptionType in the composition maps those on read.
+        type: 'word' | 'phrase' | 'sentence';
         animation: 'pop' | 'fade' | 'slide' | 'none';
         color: string;
         fontSize: number;

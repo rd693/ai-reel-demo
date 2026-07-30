@@ -48,8 +48,8 @@ const VOICES = [
 
 const CAPTION_STYLES = [
     { value: "word", label: "Single Word", description: "One word at a time (Viral style)" },
-    { value: "phrase", label: "Short Phrase", description: "3-4 words per line" },
-    { value: "line", label: "Full Line", description: "Classic subtitle style" }
+    { value: "phrase", label: "Short Phrase", description: "Up to 3 words per line" },
+    { value: "sentence", label: "Full Line", description: "Classic subtitle style" }
 ];
 
 export default function NewSeriesPage() {
@@ -299,7 +299,7 @@ export default function NewSeriesPage() {
                                         }`}
                                 >
                                     <p className="font-bold text-slate-900">Free Stack</p>
-                                    <p className="text-xs text-slate-500 mt-1">Bypasses expensive API calls. Uses Gemini/Groq, Google TTS, and community image models.</p>
+                                    <p className="text-xs text-slate-500 mt-1">Script by Groq or Gemini, images from Together or Pollinations. No paid image calls.</p>
                                 </button>
                                 <button
                                     onClick={() => setFormData({ ...formData, usePremiumImageStack: true })}
@@ -312,9 +312,14 @@ export default function NewSeriesPage() {
                                         <p className="font-bold text-indigo-700">Paid (Pro) Stack</p>
                                         <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.5 rounded font-black">PREMIUM</span>
                                     </div>
-                                    <p className="text-xs text-slate-500 mt-1">High-fidelity production. Uses Claude, ElevenLabs with perfect sync, and Fal.ai Flux Pro.</p>
+                                    <p className="text-xs text-slate-500 mt-1">Script by Claude, images from Fal.ai Flux Pro.</p>
                                 </button>
                             </div>
+                            {/* Azure was removed; ElevenLabs is the only voice provider, so
+                                the stack choice no longer affects the voiceover at all. */}
+                            <p className="text-xs text-slate-400 mt-3">
+                                Voiceover uses ElevenLabs on both, including word-level caption sync.
+                            </p>
                         </div>
 
                         <div className="flex gap-4 pt-4">

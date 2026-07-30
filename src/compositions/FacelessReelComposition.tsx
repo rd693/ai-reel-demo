@@ -63,12 +63,89 @@ const SafeImg = ({ src, style }: { src: string; style?: React.CSSProperties; sce
     );
 };
 
+// --- Captions ---
+
+export type CaptionType = 'word' | 'phrase' | 'sentence';
+
+/**
+ * Accepts the older spellings this field has had.
+ *
+ * The create wizard wrote "phrase"/"line", the domain type said
+ * "word"/"double"/"sentence", and this file used
+ * "word"/"sentence"/"split"/"double" — three vocabularies for one setting. Only
+ * "word" and "sentence" were ever handled, and anything else fell through to
+ * rendering no captions at all. Existing rows still hold the old values, so
+ * they are mapped rather than rejected.
+ */
+export function normalizeCaptionType(value: string | undefined): CaptionType {
+    switch (value) {
+        case 'phrase':
+        case 'double': // two words at a time — a phrase by another name
+        case 'split':
+            return 'phrase';
+        case 'sentence':
+        case 'line':
+            return 'sentence';
+        default:
+            return 'word';
+    }
+}
+
+/** Words per group in phrase mode, and the ceiling before a sentence is split. */
+const PHRASE_SIZE = 3;
+const MAX_SENTENCE_WORDS = 12;
+
+const ENDS_SENTENCE = /[.!?।]["')\]]?$/;
+
+type CaptionGroup = { id: string; text: string; startMs: number; endMs: number };
+
+/**
+ * Batches word-level captions into what each style shows on screen at once.
+ *
+ * Every mode is driven by the same word timings, so captions stay in sync with
+ * the voice regardless of style. Sentence mode used to group by `timeline.audio`
+ * instead — and since a reel has exactly one global voiceover segment, that
+ * rendered the entire script as a single block for the whole video.
+ */
+export function groupCaptions(
+    captions: { id: string; text: string; startMs: number; endMs: number }[],
+    type: CaptionType,
+): CaptionGroup[] {
+    if (captions.length === 0) return [];
+    if (type === 'word') return captions;
+
+    const limit = type === 'phrase' ? PHRASE_SIZE : MAX_SENTENCE_WORDS;
+    const groups: CaptionGroup[] = [];
+    let current: typeof captions = [];
+
+    const flush = () => {
+        if (current.length === 0) return;
+        groups.push({
+            id: `${type}-${current[0].id}`,
+            text: current.map((c) => c.text).join(" "),
+            startMs: current[0].startMs,
+            endMs: current[current.length - 1].endMs,
+        });
+        current = [];
+    };
+
+    for (const caption of captions) {
+        current.push(caption);
+        // Break on punctuation so a group never straddles two sentences, and on
+        // the word limit so a long sentence does not fill the screen.
+        if (ENDS_SENTENCE.test(caption.text.trim()) || current.length >= limit) flush();
+    }
+    flush();
+
+    return groups;
+}
+
 // --- Composition ---
 
 type Props = {
     reel: FacelessReel;
     captionStyle?: {
-        type: 'word' | 'sentence' | 'split' | 'double';
+        type: CaptionType;
         animation: 'pop' | 'fade' | 'slide' | 'none';
         color: string;
         fontSize: number;
@@ -234,69 +311,41 @@ export const FacelessReelComposition = ({ reel, captionStyle, musicSettings }: P
 
             {/* 2. Viral Dynamic Subtitles */}
             {(() => {
-                const type = activeCaptionStyle?.type || 'word';
-                
-                if ((type as string) === 'single' || type === 'word') {
-                    return timeline.text.map((caption, idx) => {
-                        const { startFrame, durationInFrames } = calculateFrameTiming(
-                            caption.startMs,
-                            caption.endMs,
-                            fps
-                        );
+                const type = normalizeCaptionType(activeCaptionStyle?.type);
+                const groups = groupCaptions(timeline.text, type);
 
-                        return (
-                            <Sequence 
-                                key={caption.id} 
-                                from={startFrame} 
-                                durationInFrames={durationInFrames}
-                            >
-                                <WordCaption 
-                                    text={caption.text} 
-                                    index={idx}
-                                    color={activeCaptionStyle?.color || (idx % 4 === 0 ? "#FFD700" : "#FFFFFF")}
-                                    styleSettings={activeCaptionStyle}
-                                />
-                            </Sequence>
-                        );
-                    });
-                }
+                // Longer groups need smaller type to stay on screen.
+                const baseSize = activeCaptionStyle?.fontSize || 140;
+                const scale = type === 'word' ? 1 : type === 'phrase' ? 0.62 : 0.45;
 
-                if (type === 'sentence') {
-                    return timeline.audio.map((audio, idx) => {
-                        const { startFrame, durationInFrames } = calculateFrameTiming(
-                            audio.startMs,
-                            audio.endMs,
-                            fps
-                        );
+                return groups.map((group, idx) => {
+                    const { startFrame, durationInFrames } = calculateFrameTiming(
+                        group.startMs,
+                        group.endMs,
+                        fps
+                    );
 
-                        const sceneText = timeline.text
-                            .filter(t => t.startMs >= audio.startMs && t.endMs <= audio.endMs)
-                            .map(t => t.text)
-                            .join(" ");
-
-                        if (!sceneText) return null;
-
-                        return (
-                            <Sequence 
-                                key={`sentence-${idx}`} 
-                                from={startFrame} 
-                                durationInFrames={durationInFrames}
-                            >
-                                <WordCaption 
-                                    text={sceneText} 
-                                    index={idx}
-                                    color={activeCaptionStyle?.color || "#FFFFFF"}
-                                    styleSettings={{
-                                        ...activeCaptionStyle!,
-                                        fontSize: (activeCaptionStyle?.fontSize || 140) * 0.45 
-                                    }}
-                                />
-                            </Sequence>
-                        );
-                    });
-                }
-
-                return null;
+                    return (
+                        <Sequence
+                            key={group.id}
+                            from={startFrame}
+                            durationInFrames={durationInFrames}
+                        >
+                            <WordCaption
+                                text={group.text}
+                                index={idx}
+                                color={
+                                    activeCaptionStyle?.color ||
+                                    (type === 'word' && idx % 4 === 0 ? "#FFD700" : "#FFFFFF")
+                                }
+                                styleSettings={{
+                                    ...(activeCaptionStyle ?? {}),
+                                    fontSize: baseSize * scale,
+                                } as Props['captionStyle']}
+                            />
+                        </Sequence>
+                    );
+                });
             })()}
 
             {/* 3. Narrator Voiceover — skip if no real URL to avoid demuxer errors */}
@@ -415,7 +464,10 @@ const WordCaption = ({
             opacity,
         }}>
             <div style={{
-                color: index % 3 === 0 ? "#FFD700" : (index % 3 === 1 ? "#32CD32" : "#00FFFF"), 
+                // Was a hardcoded gold/green/cyan rotation keyed off the word
+                // index, which ignored the `color` prop entirely — so the
+                // caption colour chosen when creating a series did nothing.
+                color,
                 fontSize: styleSettings?.fontSize || 130,
                 fontWeight: 900,
                 textAlign: "center",

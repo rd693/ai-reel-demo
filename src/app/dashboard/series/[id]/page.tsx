@@ -657,33 +657,28 @@ export default function SeriesDetailPage() {
                                     <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
                                         <Type size={14} /> Dynamic Captioning
                                     </label>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <button
-                                            onClick={() => setTempSeries({
-                                                ...tempSeries,
-                                                captionStyle: { ...tempSeries.captionStyle!, type: 'word' }
-                                            })}
-                                            className={`p-6 rounded-[2rem] border-2 text-left transition-all ${tempSeries.captionStyle?.type === 'word'
-                                                    ? 'bg-indigo-50 border-indigo-600 shadow-xl shadow-indigo-50/50'
-                                                    : 'bg-white border-slate-100 hover:border-slate-300'
-                                                }`}
-                                        >
-                                            <p className="text-lg font-black text-slate-900">Word Pops</p>
-                                            <p className="text-xs text-slate-500 mt-2 font-medium leading-relaxed">High retention, one word at a time.</p>
-                                        </button>
-                                        <button
-                                            onClick={() => setTempSeries({
-                                                ...tempSeries,
-                                                captionStyle: { ...tempSeries.captionStyle!, type: 'sentence' }
-                                            })}
-                                            className={`p-6 rounded-[2rem] border-2 text-left transition-all ${tempSeries.captionStyle?.type === 'sentence'
-                                                    ? 'bg-indigo-50 border-indigo-600 shadow-xl shadow-indigo-50/50'
-                                                    : 'bg-white border-slate-100 hover:border-slate-300'
-                                                }`}
-                                        >
-                                            <p className="text-lg font-black text-slate-900">Sentence</p>
-                                            <p className="text-xs text-slate-500 mt-2 font-medium leading-relaxed">Classic subtitles for clear reading.</p>
-                                        </button>
+                                    {/* Same three styles the create wizard offers. */}
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {([
+                                            { type: 'word', title: 'Word Pops', hint: 'High retention, one word at a time.' },
+                                            { type: 'phrase', title: 'Short Phrase', hint: 'Up to three words on screen.' },
+                                            { type: 'sentence', title: 'Sentence', hint: 'Classic subtitles for clear reading.' },
+                                        ] as const).map(option => (
+                                            <button
+                                                key={option.type}
+                                                onClick={() => setTempSeries({
+                                                    ...tempSeries,
+                                                    captionStyle: { ...tempSeries.captionStyle!, type: option.type }
+                                                })}
+                                                className={`p-5 rounded-[2rem] border-2 text-left transition-all ${tempSeries.captionStyle?.type === option.type
+                                                        ? 'bg-indigo-50 border-indigo-600 shadow-xl shadow-indigo-50/50'
+                                                        : 'bg-white border-slate-100 hover:border-slate-300'
+                                                    }`}
+                                            >
+                                                <p className="text-base font-black text-slate-900">{option.title}</p>
+                                                <p className="text-xs text-slate-500 mt-2 font-medium leading-relaxed">{option.hint}</p>
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
                             </div>
