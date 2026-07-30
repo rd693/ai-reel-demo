@@ -5,6 +5,7 @@
  */
 
 import { toLanguageCode } from "./transcribe";
+import { rankVoices } from "./voiceSelection";
 
 const ELEVEN_LABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
@@ -32,7 +33,11 @@ const DEFAULT_VOICE = VOICE_MAP.storyteller;
 /** Friendly names that should map to a female voice when one is available. */
 const FEMALE_VOICE_KEYS = new Set(["bella", "rachel", "sarah", "monika"]);
 
-type AccountVoice = { id: string; name: string; language?: string; gender?: string };
+type AccountVoice = {
+    id: string; name: string;
+    language?: string; gender?: string;
+    useCase?: string; descriptive?: string; age?: string; category?: string;
+};
 
 // Voices available to this account, fetched once per process.
 let accountVoices: AccountVoice[] | null = null;
@@ -46,11 +51,15 @@ async function getAccountVoices(apiKey: string): Promise<AccountVoice[]> {
         if (!res.ok) throw new Error(`voices lookup failed: ${res.status}`);
         const data = await res.json();
         accountVoices = (data.voices ?? []).map(
-            (v: { voice_id: string; name: string; labels?: Record<string, string> }) => ({
+            (v: { voice_id: string; name: string; category?: string; labels?: Record<string, string> }) => ({
                 id: v.voice_id,
                 name: v.name,
                 language: v.labels?.language,
                 gender: v.labels?.gender,
+                useCase: v.labels?.use_case,
+                descriptive: v.labels?.descriptive,
+                age: v.labels?.age,
+                category: v.category,
             }),
         );
     } catch (e) {
@@ -60,13 +69,6 @@ async function getAccountVoices(apiKey: string): Promise<AccountVoice[]> {
     return accountVoices!;
 }
 
-/**
- * Turns a stored voice name into an id this account can actually use.
- *
- * Hardcoded ids rot: ElevenLabs retires voices, and a 404 at synthesis time is
- * indistinguishable from a bad API key. Checking the account's own list turns
- * that into a warning plus a working substitute instead of a dead pipeline.
- */
 /**
  * Voices this key has already been refused, so they are not tried again.
  *
@@ -96,45 +98,53 @@ export async function resolveVoiceCandidates(
     voiceId: string | undefined,
     apiKey: string,
     language?: string,
+    context?: string,
 ): Promise<string[]> {
     const key = (voiceId ?? "").toLowerCase();
-    const requested = VOICE_MAP[key] ?? voiceId ?? DEFAULT_VOICE;
+    const isAuto = key === "" || key === "auto";
+    const requested = VOICE_MAP[key] ?? (isAuto ? undefined : voiceId);
 
     const voices = await getAccountVoices(apiKey);
-    if (voices.length === 0) return [requested]; // Cannot verify — try it anyway.
-
-    const candidates: string[] = [];
+    if (voices.length === 0) return [requested ?? DEFAULT_VOICE]; // Cannot verify.
 
     const langCode = toLanguageCode(language);
-    if (langCode && langCode !== "en") {
-        const wantFemale = FEMALE_VOICE_KEYS.has(key);
-        const natives = voices
-            .filter((v) => v.language === langCode)
-            .sort((a, b) => {
-                const want = wantFemale ? "female" : "male";
-                return (a.gender === want ? 0 : 1) - (b.gender === want ? 0 : 1);
-            });
+    const ranked = rankVoices(voices, {
+        langCode,
+        context,
+        preferFemale: isAuto ? undefined : FEMALE_VOICE_KEYS.has(key),
+    });
 
-        if (natives.length === 0) {
-            console.warn(
-                `[ElevenLabs] No native ${langCode} voice on this account; ${language} will be read with an accent.`,
-            );
-        }
-        candidates.push(...natives.map((v) => v.id));
+    if (langCode && langCode !== "en" && !voices.some((v) => v.language === langCode)) {
+        console.warn(
+            `[ElevenLabs] No native ${langCode} voice on this account; ${language} will be read with an accent.`,
+        );
     }
 
-    // The configured voice, then a narrator, as the fallback chain.
-    candidates.push(requested);
-    const substitute =
-        voices.find((v) => /storyteller|narrat/i.test(v.name))?.id ?? DEFAULT_VOICE;
-    candidates.push(substitute);
+    // An explicit choice leads, unless the reel is in a language that voice is
+    // not native to — a Hindi reel should not be read by the English voice the
+    // series happens to have saved. "auto" always defers to the ranking.
+    const explicitFitsLanguage =
+        requested && voices.find((v) => v.id === requested)?.language === (langCode || "en");
+
+    const candidates = [
+        ...(explicitFitsLanguage ? [requested!] : []),
+        ...ranked.map((v) => v.id),
+        ...(requested ? [requested] : []),
+        DEFAULT_VOICE,
+    ];
+
+    if (isAuto && ranked[0]) {
+        console.log(
+            `[ElevenLabs] Auto-selected "${ranked[0].name}" (${ranked[0].language ?? "?"}, ${ranked[0].useCase ?? "?"}) for: ${context ?? "no context"}`,
+        );
+    }
 
     return candidates.filter(
-        (id, i) => id && !unusableVoices.has(id) && candidates.indexOf(id) === i,
+        (id, i): id is string => !!id && !unusableVoices.has(id) && candidates.indexOf(id) === i,
     );
 }
 
-export async function synthesizeSpeech(text: string, voiceId: string = "arnold", language: string = "english"): Promise<string> {
+export async function synthesizeSpeech(text: string, voiceId: string = "arnold", language: string = "english", context?: string): Promise<string> {
     const apiKey = process.env.ELEVEN_LABS_API_KEY;
     
     if (!apiKey || apiKey === "your_key_here") {
@@ -156,7 +166,7 @@ export async function synthesizeSpeech(text: string, voiceId: string = "arnold",
         return "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjIzLjEwMgAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIwADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//OEAAAAAAAAAAAAAAAAAAAAAAAADExU0UAAAAGAAAAbGF2Zf//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     }
 
-    const candidates = await resolveVoiceCandidates(voiceId, apiKey, language);
+    const candidates = await resolveVoiceCandidates(voiceId, apiKey, language, context);
 
     try {
         for (const voiceGuid of candidates) {
@@ -248,7 +258,8 @@ export function parseAlignmentsToWords(
 export async function synthesizeSpeechWithTimestamps(
     text: string,
     voiceId: string = "arnold",
-    language: string = "english"
+    language: string = "english",
+    context?: string,
 ): Promise<{ audioUrl: string; words: WordTimestamp[] } | null> {
     const apiKey = process.env.ELEVEN_LABS_API_KEY;
     if (!apiKey || apiKey === "your_key_here") {
@@ -256,7 +267,7 @@ export async function synthesizeSpeechWithTimestamps(
         return null;
     }
 
-    const candidates = await resolveVoiceCandidates(voiceId, apiKey, language);
+    const candidates = await resolveVoiceCandidates(voiceId, apiKey, language, context);
 
     try {
         let response: Response | null = null;

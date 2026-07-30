@@ -34,12 +34,12 @@ const MIN_VOICEOVER_BYTES = 4096;
  */
 export async function synthesizeVoiceover(
     text: string,
-    { voiceId = "storyteller", language = "english" } = {},
+    { voiceId = "storyteller", language = "english", context = undefined as string | undefined } = {},
 ): Promise<Voiceover | null> {
     const persist = (audio: string) =>
         persistDataUrl(audio, "voiceovers", { minBytes: MIN_VOICEOVER_BYTES });
 
-    const timestamped = await synthesizeSpeechWithTimestamps(text, voiceId, language);
+    const timestamped = await synthesizeSpeechWithTimestamps(text, voiceId, language, context);
     if (timestamped?.audioUrl) {
         const path = await persist(timestamped.audioUrl);
         if (path) {
@@ -49,7 +49,7 @@ export async function synthesizeVoiceover(
         console.warn("[voice] Timestamped synthesis returned unusable audio, retrying plain");
     }
 
-    const basic = await synthesizeSpeech(text, voiceId, language);
+    const basic = await synthesizeSpeech(text, voiceId, language, context);
     const path = await persist(basic);
     if (path) {
         console.log("[voice] ElevenLabs (no timestamps)");

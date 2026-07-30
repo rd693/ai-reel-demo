@@ -118,6 +118,11 @@ export async function generateReel(reelId: string, options: GenerateOptions = {}
             const voice = await synthesizeVoiceover(current.script, {
                 voiceId: series.voiceId,
                 language,
+                // Niche and series blurb are what decide whether this wants a
+                // narrator, an educator or a social-media read.
+                context: [series.niche, series.seriesContext, current.businessName]
+                    .filter(Boolean)
+                    .join(" "),
             });
             if (!voice) {
                 throw new Error("Voice synthesis failed. Check ELEVEN_LABS_API_KEY.");

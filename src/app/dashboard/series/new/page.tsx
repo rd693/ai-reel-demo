@@ -40,6 +40,10 @@ const LANGUAGES = [
 ];
 
 const VOICES = [
+    // Ranks the account's voices by language and by how their ElevenLabs
+    // use_case tag fits the niche, so a history series gets a narrator and a
+    // Hindi series gets a Hindi voice.
+    { value: "auto", label: "Auto — match to series" },
     { value: "antoni", label: "Antoni (Deep Narrative)" },
     { value: "bella", label: "Bella (Soft Storyteller)" },
     { value: "arnold", label: "Arnold (Strong Voice)" },
@@ -65,7 +69,7 @@ export default function NewSeriesPage() {
         targetDuration: 60,
         platforms: ["tiktok"] as string[],
         language: "english",
-        voiceId: "arnold",
+        voiceId: "auto",
         captionStyle: "word",
         captionColor: "#FFD700",
         seriesContext: "",
