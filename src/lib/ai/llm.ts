@@ -582,7 +582,7 @@ FINAL REMINDER:
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
     if (usePremium && anthropicKey) {
         try {
-            console.log(`[LLM] Trying Claude Sonnet → ${resolvedSubject}`);
+            console.log(`[LLM] Trying Claude Opus → ${resolvedSubject}`);
             const res = await fetch("https://api.anthropic.com/v1/messages", {
                 method: "POST",
                 headers: {
@@ -591,19 +591,34 @@ FINAL REMINDER:
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                    model: "claude-3-5-sonnet-20241022",
-                    max_tokens: 4000,
+                    // claude-3-5-sonnet-20241022 was retired in October 2025 and
+                    // answers 404, so the Pro stack silently fell through to Groq
+                    // on every request — the premium script model never ran once.
+                    model: "claude-opus-5",
+                    // Opus 5 thinks by default, and max_tokens caps thinking plus
+                    // the response together. The old 4000 would be spent reasoning
+                    // and truncate the JSON mid-object.
+                    max_tokens: 16000,
                     system: systemPrompt,
                     messages: [{ role: "user", content: userPrompt }]
                 })
             });
             if (res.ok) {
                 const data = await res.json();
-                const result = parseJSON(data.content[0].text);
-                console.log(`[LLM] ✅ Claude success — ${result.scenes.length} scenes, subject: ${result.subject}`);
-                return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride, !isCustom);
+                // A safety refusal returns HTTP 200 with an empty content array,
+                // so content[0] must not be read before checking.
+                if (data.stop_reason === "refusal") {
+                    console.warn(`[LLM] Claude declined this subject; trying Groq...`);
+                } else {
+                    const text = data.content?.find((b: { type: string }) => b.type === "text")?.text;
+                    if (!text) throw new Error("Claude returned no text block");
+                    const result = parseJSON(text);
+                    console.log(`[LLM] ✅ Claude success — ${result.scenes.length} scenes, subject: ${result.subject}`);
+                    return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride, !isCustom);
+                }
+            } else {
+                console.warn(`[LLM] Claude failed (${res.status}), trying Groq...`);
             }
-            console.warn(`[LLM] Claude failed (${res.status}), trying Groq...`);
         } catch (e: any) {
             console.warn(`[LLM] Claude error: ${e.message}`);
         }
