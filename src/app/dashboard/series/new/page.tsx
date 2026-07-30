@@ -7,7 +7,6 @@ import Link from "next/link";
 import { v4 as uuidv4 } from "uuid";
 import { seriesStore } from "../../../../lib/series/seriesStore";
 import { NicheType, ArtStyle, Series } from "../../../../types/series";
-import { generateFacelessReelContent } from "../../../../agents/seriesAgent";
 import { getDefaultMusic } from "../../../../lib/music";
 
 const NICHES: { value: NicheType; label: string; description: string }[] = [
@@ -123,23 +122,28 @@ export default function NewSeriesPage() {
     const handleGeneratePreview = async () => {
         setLoading(true);
         try {
-            // This is an OPTIONAL preview of what AI would generate with these settings
-            const content = await generateFacelessReelContent(
-                formData.niche,
-                formData.artStyle,
-                formData.targetDuration,
-                formData.language,
-                formData.voiceId,
-                undefined,                          // no customScript
-                formData.name,                      // ✅ series name as subject hint
-                formData.seriesContext || undefined, // ✅ context
-                undefined,                          // visualStylePrompt
-                undefined,                          // visualStyleOverride
-                formData.usePremiumImageStack       // Pass toggle value!
-            );
-            setPreviewContent(content);
+            // Only the script is shown, so only the script is generated. This
+            // used to run the whole pipeline — voiceover, transcription and one
+            // image per scene — to display 150 characters of text, for a series
+            // that did not exist yet and a reel that was thrown away.
+            const res = await fetch("/api/series/generate-script", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    niche: formData.niche,
+                    language: formData.language,
+                    durationInSeconds: formData.targetDuration,
+                    artStyle: formData.artStyle,
+                    subject: formData.name || formData.niche,
+                    seriesContext: formData.seriesContext || undefined,
+                    usePremium: formData.usePremiumImageStack,
+                }),
+            });
+            if (!res.ok) throw new Error("Preview generation failed");
+            setPreviewContent(await res.json());
         } catch (e) {
             console.error(e);
+            setLaunchError(e instanceof Error ? e.message : "Preview failed");
         } finally {
             setLoading(false);
         }
