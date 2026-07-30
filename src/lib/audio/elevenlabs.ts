@@ -67,49 +67,71 @@ async function getAccountVoices(apiKey: string): Promise<AccountVoice[]> {
  * indistinguishable from a bad API key. Checking the account's own list turns
  * that into a warning plus a working substitute instead of a dead pipeline.
  */
-export async function resolveVoiceId(
+/**
+ * Voices this key has already been refused, so they are not tried again.
+ *
+ * Free plans cannot use Voice Library voices over the API — the account lists
+ * them, but synthesis answers 402 paid_plan_required. Availability therefore
+ * cannot be read off the voice list; it is only knowable by trying.
+ */
+const unusableVoices = new Set<string>();
+
+export function markVoiceUnusable(voiceGuid: string, reason: string) {
+    if (!unusableVoices.has(voiceGuid)) {
+        console.warn(`[ElevenLabs] Voice ${voiceGuid} unavailable (${reason}); falling back.`);
+        unusableVoices.add(voiceGuid);
+    }
+}
+
+/**
+ * Voice ids to try, best first.
+ *
+ * A non-English reel prefers a voice native to that language — the multilingual
+ * model reads Devanagari with an English voice, but with an English accent,
+ * which is the one thing a Hindi channel cannot have. The preferred voice may
+ * be unusable on this plan, so the caller works down the list until synthesis
+ * actually succeeds rather than assuming the first one will.
+ */
+export async function resolveVoiceCandidates(
     voiceId: string | undefined,
     apiKey: string,
     language?: string,
-): Promise<string> {
+): Promise<string[]> {
     const key = (voiceId ?? "").toLowerCase();
     const requested = VOICE_MAP[key] ?? voiceId ?? DEFAULT_VOICE;
 
     const voices = await getAccountVoices(apiKey);
-    if (voices.length === 0) return requested; // Cannot verify — try it anyway.
+    if (voices.length === 0) return [requested]; // Cannot verify — try it anyway.
 
-    // A non-English reel gets a voice native to that language when the account
-    // has one. eleven_multilingual_v2 will read Hindi with an English voice,
-    // but it carries an English accent — which is the whole thing a "faceless
-    // Hindi channel" cannot have. The original code hardcoded two Indian voice
-    // ids for this; they were retired and 404'd, so the match is made against
-    // the account's own list instead.
+    const candidates: string[] = [];
+
     const langCode = toLanguageCode(language);
     if (langCode && langCode !== "en") {
-        const natives = voices.filter((v) => v.language === langCode);
-        if (natives.length > 0) {
-            const wantFemale = FEMALE_VOICE_KEYS.has(key);
-            const match =
-                natives.find((v) => v.gender === (wantFemale ? "female" : "male")) ?? natives[0];
-            console.log(`[ElevenLabs] Using native ${langCode} voice "${match.name}" for ${language}.`);
-            return match.id;
+        const wantFemale = FEMALE_VOICE_KEYS.has(key);
+        const natives = voices
+            .filter((v) => v.language === langCode)
+            .sort((a, b) => {
+                const want = wantFemale ? "female" : "male";
+                return (a.gender === want ? 0 : 1) - (b.gender === want ? 0 : 1);
+            });
+
+        if (natives.length === 0) {
+            console.warn(
+                `[ElevenLabs] No native ${langCode} voice on this account; ${language} will be read with an accent.`,
+            );
         }
-        console.warn(
-            `[ElevenLabs] No native ${langCode} voice on this account; "${voiceId}" will read ${language} with its own accent.`,
-        );
+        candidates.push(...natives.map((v) => v.id));
     }
 
-    if (voices.some((v) => v.id === requested)) return requested;
-
+    // The configured voice, then a narrator, as the fallback chain.
+    candidates.push(requested);
     const substitute =
-        voices.find((v) => /storyteller|narrat/i.test(v.name)) ??
-        voices.find((v) => v.id === DEFAULT_VOICE) ??
-        voices[0];
+        voices.find((v) => /storyteller|narrat/i.test(v.name))?.id ?? DEFAULT_VOICE;
+    candidates.push(substitute);
 
-    console.warn(
-        `[ElevenLabs] Voice "${voiceId}" (${requested}) is not on this account; using "${substitute.name}".`,
+    return candidates.filter(
+        (id, i) => id && !unusableVoices.has(id) && candidates.indexOf(id) === i,
     );
-    return substitute.id;
 }
 
 export async function synthesizeSpeech(text: string, voiceId: string = "arnold", language: string = "english"): Promise<string> {
@@ -134,35 +156,42 @@ export async function synthesizeSpeech(text: string, voiceId: string = "arnold",
         return "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjIzLjEwMgAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIwADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//OEAAAAAAAAAAAAAAAAAAAAAAAADExU0UAAAAGAAAAbGF2Zf//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     }
 
-    const voiceGuid = await resolveVoiceId(voiceId, apiKey, language);
+    const candidates = await resolveVoiceCandidates(voiceId, apiKey, language);
 
     try {
-        console.log(`[ElevenLabs] Synthesizing with model: eleven_multilingual_v2, Voice GUID: ${voiceGuid} (Voice: ${voiceId})`);
-        const response = await fetch(`${ELEVEN_LABS_API_URL}/${voiceGuid}`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "xi-api-key": apiKey
-            },
-            body: JSON.stringify({
-                text,
-                model_id: "eleven_multilingual_v2",
-                voice_settings: {
-                    stability: 0.65,
-                    similarity_boost: 0.8,
-                    style: 0.5,
-                    use_speaker_boost: true
-                }
-            })
-        });
+        for (const voiceGuid of candidates) {
+            console.log(`[ElevenLabs] Synthesizing with model: eleven_multilingual_v2, Voice GUID: ${voiceGuid} (Voice: ${voiceId})`);
+            const response = await fetch(`${ELEVEN_LABS_API_URL}/${voiceGuid}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "xi-api-key": apiKey
+                },
+                body: JSON.stringify({
+                    text,
+                    model_id: "eleven_multilingual_v2",
+                    voice_settings: {
+                        stability: 0.65,
+                        similarity_boost: 0.8,
+                        style: 0.5,
+                        use_speaker_boost: true
+                    }
+                })
+            });
 
-        if (!response.ok) {
-            throw new Error(`ElevenLabs API error: ${response.statusText}`);
+            if (response.ok) {
+                const blob = await response.blob();
+                const buffer = Buffer.from(await blob.arrayBuffer());
+                return `data:audio/mpeg;base64,${buffer.toString("base64")}`;
+            }
+
+            // 402 means the voice needs a paid plan, 401/404 that it is not
+            // usable by this key. Either way the next candidate may work, so
+            // remember it and move on instead of failing the reel.
+            markVoiceUnusable(voiceGuid, `${response.status} ${response.statusText}`);
         }
 
-        const blob = await response.blob();
-        const buffer = Buffer.from(await blob.arrayBuffer());
-        return `data:audio/mpeg;base64,${buffer.toString("base64")}`;
+        throw new Error("No usable voice on this account");
     } catch (error) {
         console.error("Speech synthesis failed:", error);
         return "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjIzLjEwMgAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIwADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//OEAAAAAAAAAAAAAAAAAAAAAAAADExU0UAAAAGAAAAbGF2Zf//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -227,33 +256,43 @@ export async function synthesizeSpeechWithTimestamps(
         return null;
     }
 
-    const voiceGuid = await resolveVoiceId(voiceId, apiKey, language);
+    const candidates = await resolveVoiceCandidates(voiceId, apiKey, language);
 
     try {
-        console.log(`[ElevenLabs] Synthesizing with timestamps. Voice GUID: ${voiceGuid} (Voice: ${voiceId})`);
-        // The path is "stream/with-timestamps", not "stream-with-timestamps".
-        // The hyphenated form 404s, which silently cost every reel its word
-        // timings and pushed captions onto punctuation-based estimation.
-        const response = await fetch(`${ELEVEN_LABS_API_URL}/${voiceGuid}/stream/with-timestamps`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "xi-api-key": apiKey
-            },
-            body: JSON.stringify({
-                text,
-                model_id: "eleven_multilingual_v2",
-                voice_settings: {
-                    stability: 0.65,
-                    similarity_boost: 0.8,
-                    style: 0.5,
-                    use_speaker_boost: true
-                }
-            })
-        });
+        let response: Response | null = null;
 
-        if (!response.ok) {
-            throw new Error(`ElevenLabs with-timestamps failed: ${response.statusText}`);
+        for (const voiceGuid of candidates) {
+            console.log(`[ElevenLabs] Synthesizing with timestamps. Voice GUID: ${voiceGuid} (Voice: ${voiceId})`);
+            // The path is "stream/with-timestamps", not "stream-with-timestamps".
+            // The hyphenated form 404s, which silently cost every reel its word
+            // timings and pushed captions onto punctuation-based estimation.
+            const attempt = await fetch(`${ELEVEN_LABS_API_URL}/${voiceGuid}/stream/with-timestamps`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "xi-api-key": apiKey
+                },
+                body: JSON.stringify({
+                    text,
+                    model_id: "eleven_multilingual_v2",
+                    voice_settings: {
+                        stability: 0.65,
+                        similarity_boost: 0.8,
+                        style: 0.5,
+                        use_speaker_boost: true
+                    }
+                })
+            });
+
+            if (attempt.ok) {
+                response = attempt;
+                break;
+            }
+            markVoiceUnusable(voiceGuid, `${attempt.status} ${attempt.statusText}`);
+        }
+
+        if (!response) {
+            throw new Error("No usable voice on this account for timestamped synthesis");
         }
 
         const reader = response.body;
