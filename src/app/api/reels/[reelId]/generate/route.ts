@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { reelRepo } from "@/lib/db/reelRepo";
-import { generateReel } from "@/lib/pipeline/generateReel";
+import { generateReel, isGenerating } from "@/lib/pipeline/generateReel";
 
 type Params = { params: Promise<{ reelId: string }> };
 
@@ -17,9 +17,13 @@ export async function POST(_req: Request, { params }: Params) {
         const reel = await reelRepo.getById(reelId);
         if (!reel) return NextResponse.json({ error: "Reel not found" }, { status: 404 });
 
-        if (["scripted", "voicing", "visualizing"].includes(reel.generationStatus)) {
+        // Asks the pipeline whether a run is actually in flight. generationStatus
+        // records the last stage that finished, so a reel left at "scripted" by a
+        // crash looks identical to one mid-flight — guarding on it made exactly
+        // the reels that needed resuming impossible to resume.
+        if (isGenerating(reelId)) {
             return NextResponse.json(
-                { error: "Generation already in progress" },
+                { error: "Generation is already running for this reel" },
                 { status: 409 },
             );
         }

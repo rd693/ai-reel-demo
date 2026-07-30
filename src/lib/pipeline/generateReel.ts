@@ -50,7 +50,34 @@ export type GenerateOptions = {
  * row as `failed` with a message, because the caller is a fire-and-forget
  * background task with nobody to catch them.
  */
+/**
+ * Reels being generated right now, in this process.
+ *
+ * generationStatus cannot answer "is something running": it records the last
+ * stage that finished, so a reel left at "scripted" by a crash is
+ * indistinguishable from one mid-flight. Timestamps are no better — any edit
+ * bumps updatedAt. This is the only signal that is actually about the run.
+ */
+const runningReels = new Set<string>();
+
+export function isGenerating(reelId: string): boolean {
+    return runningReels.has(reelId);
+}
+
 export async function generateReel(reelId: string, options: GenerateOptions = {}): Promise<void> {
+    if (runningReels.has(reelId)) {
+        console.warn(`[pipeline ${reelId}] already running; ignoring duplicate start`);
+        return;
+    }
+    runningReels.add(reelId);
+    try {
+        await runPipeline(reelId, options);
+    } finally {
+        runningReels.delete(reelId);
+    }
+}
+
+async function runPipeline(reelId: string, options: GenerateOptions): Promise<void> {
     const row = await prisma.reel.findUnique({
         where: { id: reelId },
         include: { series: true, scenes: { orderBy: { index: "asc" } } },

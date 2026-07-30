@@ -4,6 +4,7 @@ import { FacelessReel } from "../types/series";
 import { createTimeline } from "../agents/timelineAgent";
 import { calculateFrameTiming } from "../lib/timing";
 import { resolveTrackUrl } from "../lib/music";
+import { resolveMediaUrl } from "../lib/media/resolveMediaUrl";
 
 
 // --- Robust Media Components ---
@@ -216,10 +217,8 @@ export const FacelessReelComposition = ({ reel, captionStyle, musicSettings }: P
             const rawUrl = scene.backgroundUrl || (scene as any).imageUrl;
             if (!rawUrl) return;
             const baseHost = (reel as any).baseHost || "";
-            const isData = rawUrl?.startsWith('data:');
-            const imgUrl = (isData || !rawUrl)
-                ? rawUrl
-                : `${baseHost}/api/image-proxy?url=${encodeURIComponent(rawUrl)}&v=${scene.id || i}`;
+            const imgUrl = resolveMediaUrl(rawUrl, baseHost, scene.id || i);
+            if (!imgUrl) return;
 
             const img = new Image();
             img.crossOrigin = "anonymous"; // ✅ CRITICAL: CORS matches SafeImg and Img cache keys perfectly!
@@ -236,10 +235,7 @@ export const FacelessReelComposition = ({ reel, captionStyle, musicSettings }: P
                     const scene = boundary.scene;
                     const rawUrl = scene.backgroundUrl || (scene as any).imageUrl;
                     const baseHost = (reel as any).baseHost || "";
-                    const isData = rawUrl?.startsWith('data:');
-                    const imgUrl = (isData || !rawUrl)
-                        ? rawUrl
-                        : `${baseHost}/api/image-proxy?url=${encodeURIComponent(rawUrl)}&v=${scene.id || i}`;
+                    const imgUrl = resolveMediaUrl(rawUrl, baseHost, scene.id || i);
 
                     // --- Improved Transition Logic ---
                     // We use zIndex and staggered visibility to ensure no black frames.

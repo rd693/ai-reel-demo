@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle2, Loader2, Video, Share2, Sparkles, Palette, Type, Check, Download, Trash2, Clock, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
 import { seriesStore, type RenderJob } from "@/lib/series/seriesStore";
+import { resolveMediaUrl } from "@/lib/media/resolveMediaUrl";
 import { Series, FacelessReel } from "@/types/series";
 import { createTimeline } from "@/agents/timelineAgent";
 
@@ -33,8 +34,7 @@ export default function ReelDetailPage() {
         const imageUrls = reel.scenes.map((scene, i) => {
             const rawUrl = scene.backgroundUrl || (scene as any).imageUrl;
             if (!rawUrl) return null;
-            const isData = rawUrl.startsWith('data:');
-            return isData ? rawUrl : `${baseHost}/api/image-proxy?url=${encodeURIComponent(rawUrl)}&v=${scene.id || i}`;
+            return resolveMediaUrl(rawUrl, baseHost, scene.id || i);
         }).filter(Boolean) as string[];
 
         const audioUrl = reel.voiceoverUrl 
@@ -466,9 +466,7 @@ export default function ReelDetailPage() {
                                     <div className="flex flex-col md:flex-row gap-8">
                                         <div className="w-full md:w-48 h-48 rounded-3xl overflow-hidden shadow-inner bg-slate-100 flex-shrink-0 relative">
                                             <img 
-                                                src={scene.backgroundUrl ? (scene.backgroundUrl.startsWith('data:') 
-                                                    ? scene.backgroundUrl 
-                                                    : `/api/image-proxy?url=${encodeURIComponent(scene.backgroundUrl)}&v=${scene.id || i}&t=${Date.now()}`) : ""} 
+                                                src={resolveMediaUrl(scene.backgroundUrl, "", `${scene.id || i}&t=${Date.now()}`) ?? ""}
                                                 className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
                                                 alt={`Scene ${i + 1}`} 
                                             />

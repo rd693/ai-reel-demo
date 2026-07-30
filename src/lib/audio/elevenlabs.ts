@@ -310,49 +310,61 @@ export async function synthesizeSpeechWithTimestamps(
         if (!reader) throw new Error("No response body stream available");
 
         let buffer = "";
-        let audioBase64Concat = "";
+        // Each streamed chunk carries its OWN complete base64 string, padding
+        // included. Appending them as text and decoding once returned only the
+        // first chunk — Node stops at the first "=" — so every voiceover ever
+        // produced here was a ~0.4-2s fragment while the word timings covered
+        // the whole script. Decode per chunk, join the bytes.
+        const audioChunks: Buffer[] = [];
         const allCharacters: string[] = [];
         const allStarts: number[] = [];
         const allEnds: number[] = [];
 
+        const consumeLine = (line: string) => {
+            if (!line) return;
+            try {
+                const chunkData = JSON.parse(line);
+                if (chunkData.audio_base64) {
+                    audioChunks.push(Buffer.from(chunkData.audio_base64, "base64"));
+                }
+                const align = chunkData.alignment ?? chunkData.normalized_alignment;
+                if (align) {
+                    if (align.characters) {
+                        allCharacters.push(...align.characters);
+                    }
+                    if (align.character_start_times_seconds) {
+                        allStarts.push(...align.character_start_times_seconds);
+                    }
+                    if (align.character_end_times_seconds) {
+                        allEnds.push(...align.character_end_times_seconds);
+                    }
+                }
+            } catch {
+                // Ignore syntax errors from partial chunks.
+            }
+        };
+
         for await (const chunk of reader as any) {
-            const chunkStr = new TextDecoder().decode(chunk);
-            buffer += chunkStr;
+            buffer += new TextDecoder().decode(chunk, { stream: true });
 
             let lineEndIndex;
             while ((lineEndIndex = buffer.indexOf("\n")) !== -1) {
-                const line = buffer.substring(0, lineEndIndex).trim();
+                consumeLine(buffer.substring(0, lineEndIndex).trim());
                 buffer = buffer.substring(lineEndIndex + 1);
-
-                if (line) {
-                    try {
-                        const chunkData = JSON.parse(line);
-                        if (chunkData.audio_base64) {
-                            audioBase64Concat += chunkData.audio_base64;
-                        }
-                        if (chunkData.alignment) {
-                            const align = chunkData.alignment;
-                            if (align.characters) {
-                                allCharacters.push(...align.characters);
-                            }
-                            if (align.character_start_times_seconds) {
-                                allStarts.push(...align.character_start_times_seconds);
-                            }
-                            if (align.character_end_times_seconds) {
-                                allEnds.push(...align.character_end_times_seconds);
-                            }
-                        }
-                    } catch (e) {
-                        // ignore syntax errors from partial chunks
-                    }
-                }
             }
         }
 
-        const audioUrl = `data:audio/mpeg;base64,${audioBase64Concat}`;
+        // The final line arrives without a trailing newline, so it never
+        // reached the loop above and its audio was dropped.
+        consumeLine(buffer.trim());
+
+        const audio = Buffer.concat(audioChunks);
+        const audioUrl = `data:audio/mpeg;base64,${audio.toString("base64")}`;
         const words = parseAlignmentsToWords(allCharacters, allStarts, allEnds);
 
-        console.log(`[ElevenLabs] ✅ Timestamps success. Generated ${words.length} words.`);
+        console.log(
+            `[ElevenLabs] ✅ Timestamps success. ${words.length} words, ${audioChunks.length} audio chunks, ${audio.length} bytes.`,
+        );
         return { audioUrl, words };
     } catch (error) {
         console.error("[ElevenLabs] Timestamps failed:", error);
