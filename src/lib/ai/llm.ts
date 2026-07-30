@@ -79,27 +79,164 @@ const ART_STYLE_PROMPTS: Record<string, string> = {
 // ─────────────────────────────────────────────────────────────
 // DURATION TARGETS
 // ─────────────────────────────────────────────────────────────
-function getTargets(durationInSeconds: number) {
-    if (durationInSeconds <= 60) return {
-        wordCount: "130-150",
-        sceneCount: Math.max(8, Math.ceil(durationInSeconds / 6)),
-        sceneDuration: 6,
-        acts: 3,
-        format: "9:16 portrait"
-    };
-    if (durationInSeconds <= 180) return {
-        wordCount: "380-420",
-        sceneCount: Math.ceil(durationInSeconds / 8),
-        sceneDuration: 8,
-        acts: 5,
-        format: "1:16 landscape"
-    };
+/**
+ * Narration speed used to turn a target duration into a word budget.
+ *
+ * Measured across six ElevenLabs runs: 2.43, 2.52, 2.53, 2.58, 2.77 and 2.81
+ * words/second — the rate genuinely varies with the content, so no constant
+ * hits the target exactly. 2.6 is the mean, which centres the error instead of
+ * biasing every reel short.
+ *
+ * Expect roughly +/-10% on the finished audio. The budget deliberately does not
+ * chase perfection: matching exactly would mean synthesising, measuring, and
+ * regenerating, which costs a second TTS call on every reel.
+ */
+export const WORDS_PER_SECOND = 2.6;
+
+/** Reels may run this much over target before the script is trimmed. */
+const OVERRUN_TOLERANCE = 1.1;
+
+export function getTargets(durationInSeconds: number) {
+    const targetWords = Math.round(durationInSeconds * WORDS_PER_SECOND);
+
+    // The previous bands ("130-150" and friends) were only ever read as a
+    // minimum — the prompts took the lower bound and told the model to expand
+    // if it was under. Nothing stated an upper bound, so a 60s reel routinely
+    // came back at ~280 words and ran to 108s. The budget is now a range with
+    // a real ceiling, and enforceWordBudget guarantees it.
+    const minWords = Math.round(targetWords * 0.9);
+    const maxWords = Math.round(targetWords * OVERRUN_TOLERANCE);
+
+    if (durationInSeconds <= 60) {
+        return {
+            targetWords, minWords, maxWords,
+            sceneCount: Math.max(8, Math.ceil(durationInSeconds / 6)),
+            sceneDuration: 6,
+            acts: 3,
+            format: "9:16 portrait",
+        };
+    }
+    if (durationInSeconds <= 180) {
+        return {
+            targetWords, minWords, maxWords,
+            sceneCount: Math.ceil(durationInSeconds / 8),
+            sceneDuration: 8,
+            acts: 5,
+            format: "1:16 landscape",
+        };
+    }
     return {
-        wordCount: "650-720",
+        targetWords, minWords, maxWords,
         sceneCount: Math.ceil(durationInSeconds / 12),
         sceneDuration: 12,
         acts: 7,
-        format: "16:9 landscape"
+        format: "16:9 landscape",
+    };
+}
+
+// ─────────────────────────────────────────────────────────────
+// WORD BUDGET ENFORCEMENT
+// ─────────────────────────────────────────────────────────────
+
+export function countWords(text: string): number {
+    return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Splits on Latin terminators and the Devanagari danda. */
+function splitSentences(text: string): string[] {
+    return (text.match(/[^।.!?]+[।.!?]+|[^।.!?]+$/g) ?? [])
+        .map((s) => s.trim())
+        .filter(Boolean);
+}
+
+/**
+ * Brings a generated script within its word budget.
+ *
+ * Prompting alone does not hold — models overshoot word counts routinely — so
+ * this is the guarantee.
+ *
+ * Every scene keeps its opening sentence, then remaining budget is handed out
+ * round-robin, one sentence at a time, until the next sentence would not fit.
+ * That keeps all the scenes (and so the visual arc and the ending) and spends
+ * the whole budget, where trimming each scene proportionally left reels well
+ * short of target whenever sentences were long.
+ *
+ * Cuts land on sentence boundaries — Latin terminators or the Devanagari danda
+ * — so the voice never reads a fragment. `script` is rebuilt from the kept
+ * sentences so the text sent to text-to-speech is exactly the text the scenes
+ * are timed against.
+ */
+export function enforceWordBudget(result: GeneratedScript, maxWords: number): GeneratedScript {
+    const scenes = result.scenes ?? [];
+    if (scenes.length === 0 || maxWords <= 0) return result;
+
+    const total = scenes.reduce((sum, s) => sum + countWords(s.narrationText || ""), 0);
+    if (total <= maxWords) {
+        // Within budget, but still normalise: models return a `script` that
+        // does not quite match the scene narrations (152 vs 137 words in one
+        // observed run). The script is what gets spoken while the scene word
+        // counts decide where cuts land, so any drift between them slides the
+        // cuts off the narration. Scenes win — narration with no scene has
+        // nothing to show behind it.
+        return { ...result, script: scenes.map((s) => s.narrationText).join(" ") };
+    }
+
+    console.warn(
+        `[LLM] Script is ${total} words against a ${maxWords} budget (~${Math.round(total / WORDS_PER_SECOND)}s vs ~${Math.round(maxWords / WORDS_PER_SECOND)}s). Trimming.`,
+    );
+
+    const sentencesPerScene = scenes.map((s) => splitSentences(s.narrationText || ""));
+
+    // Pass 1: one sentence each, so no scene is left without narration. This
+    // can exceed the budget on its own; dropping a scene would cost an image
+    // and a beat of the story, which is the worse trade.
+    const kept = sentencesPerScene.map((sentences) => sentences.slice(0, 1));
+    let used = kept.reduce((sum, s) => sum + countWords(s.join(" ")), 0);
+
+    // Pass 2: round-robin the remainder so later scenes are not starved.
+    let added = true;
+    while (added) {
+        added = false;
+        for (let i = 0; i < scenes.length; i++) {
+            const next = sentencesPerScene[i][kept[i].length];
+            if (!next) continue;
+            const words = countWords(next);
+            if (used + words > maxWords) continue;
+            kept[i].push(next);
+            used += words;
+            added = true;
+        }
+    }
+
+    let texts = kept.map((sentences, i) => sentences.join(" ").trim() || scenes[i].narrationText || "");
+
+    // Last resort. With many scenes and long opening sentences, pass 1 can
+    // exceed the budget on its own — 25 scenes of ~25 words each came to 624
+    // against a 495 cap, running 222s for a 180s target. Sentence boundaries
+    // cannot help there, so the longest scenes are cut at a word boundary
+    // instead. Only the worst offenders are touched, and never below a floor
+    // that would leave a scene with a stub.
+    used = texts.reduce((sum, t) => sum + countWords(t), 0);
+    if (used > maxWords) {
+        const perScene = Math.max(8, Math.floor(maxWords / scenes.length));
+        console.warn(
+            `[LLM] Sentence-level trim still leaves ${used} words; capping scenes at ${perScene} words each.`,
+        );
+        texts = texts.map((text) => {
+            const words = text.split(/\s+/).filter(Boolean);
+            return words.length <= perScene ? text : words.slice(0, perScene).join(" ");
+        });
+    }
+
+    const trimmed = scenes.map((scene, i) => ({ ...scene, narrationText: texts[i] }));
+
+    const after = trimmed.reduce((sum, s) => sum + countWords(s.narrationText), 0);
+    console.log(`[LLM] Trimmed to ${after} words (~${Math.round(after / WORDS_PER_SECOND)}s).`);
+
+    return {
+        ...result,
+        scenes: trimmed,
+        script: trimmed.map((s) => s.narrationText).join(" "),
     };
 }
 
@@ -133,7 +270,7 @@ export async function generateScriptWithAI(
     usePremium: boolean = false
 ): Promise<GeneratedScript> {
 
-    const { wordCount, sceneCount, sceneDuration, format } = getTargets(durationInSeconds);
+    const { targetWords, minWords, maxWords, sceneCount, sceneDuration, format } = getTargets(durationInSeconds);
     const isCustom = !!customScript;
     const stylePrompt = ART_STYLE_PROMPTS[artStyle] || ART_STYLE_PROMPTS.watercolor_illustration;
     const resolvedSubject = subject || niche;
@@ -144,7 +281,7 @@ export async function generateScriptWithAI(
     // Pre-compute trimmed style for use in prompts and enrichment
     const trimmedBase = stylePrompt.split(',').slice(0, 6).join(',');
 
-    console.log(`[LLM] Subject: "${resolvedSubject}" | Lang: ${language}→${effectiveLanguage} | Duration: ${durationInSeconds}s | Scenes: ${sceneCount} | Words: ${wordCount}`);
+    console.log(`[LLM] Subject: "${resolvedSubject}" | Lang: ${language}→${effectiveLanguage} | Duration: ${durationInSeconds}s | Scenes: ${sceneCount} | Words: ${minWords}-${maxWords} (target ${targetWords})`);
 
     // ─────────────────────────────────────────────────────────
     // VISUAL PROMPT RULES — injected into every LLM call
@@ -381,7 +518,8 @@ JSON output:
     const USER_PROMPT_AI = `
 SUBJECT: ${resolvedSubject}
 DURATION: ${durationInSeconds} seconds (${format})
-MINIMUM WORDS: ${wordCount.split('-')[0]} (hard minimum — count before submitting)
+WORD BUDGET: ${minWords}-${maxWords} words, aim for ${targetWords}. ${maxWords} is a HARD MAXIMUM.
+This script is spoken aloud at about 2.5 words per second and must last ~${durationInSeconds}s. Going over makes the video too long and it gets trimmed.
 SCENES: ${sceneCount} exactly
 LANGUAGE: ${effectiveLanguage}
 
@@ -394,7 +532,7 @@ STEP 1 — Complete this story spine (include in JSON):
 STEP 2 — Write the full script following the 6-beat biographical framework.
 STEP 3 — Split into exactly ${sceneCount} scenes.
 STEP 4 — For each scene's visualPrompt: answer Q1-Q5 silently, then write English-only prompt.
-STEP 5 — Count words in "script" field. If under ${wordCount.split('-')[0]}, expand before outputting.
+STEP 5 — Count the words in the "script" field. If under ${minWords}, expand. If over ${maxWords}, cut until it fits — tighten sentences, do not drop the ending.
 
 JSON output:
 {
@@ -402,7 +540,7 @@ JSON output:
   "subject": "${resolvedSubject}",
   "story_spine": "was born into... faced... until... proving...",
   "word_count_check": 0,
-  "script": "Full continuous ${effectiveLanguage} script — minimum ${wordCount.split('-')[0]} words",
+  "script": "Full continuous ${effectiveLanguage} script — ${minWords}-${maxWords} words",
   "scenes": [
     {
       "headline": "3-4 word ${effectiveLanguage} overlay text",
@@ -415,7 +553,7 @@ JSON output:
 
 FINAL REMINDER:
 - ${sceneCount} scenes exactly
-- Minimum ${wordCount.split('-')[0]} words in script
+- Between ${minWords} and ${maxWords} words in script (${maxWords} is a hard cap)
 - Every visualPrompt in English, every narrationText in ${effectiveLanguage}
 - Real names, real dates, real places — no invented facts
 `;
@@ -460,7 +598,8 @@ Return ONLY valid JSON. No markdown. No backticks. No explanation.
     const USER_PROMPT_AI_PREMIUM = `
 SUBJECT: ${resolvedSubject}
 DURATION: ${durationInSeconds} seconds (${format})
-MINIMUM WORDS: ${wordCount.split('-')[0]} (hard minimum — count before submitting)
+WORD BUDGET: ${minWords}-${maxWords} words, aim for ${targetWords}. ${maxWords} is a HARD MAXIMUM.
+This script is spoken aloud at about 2.5 words per second and must last ~${durationInSeconds}s. Going over makes the video too long and it gets trimmed.
 SCENES: ${sceneCount} exactly
 LANGUAGE: ${effectiveLanguage}
 ${effectiveLanguage === 'hindi' ? `CRITICAL RULE: You MUST write the entire continuous script, scenes headlines, title, and narrationText strictly in pure DEVANAGARI HINDI script characters only. Do NOT use Roman letters (no English alphabets expressing Hindi words like Hinglish).` : ''}
@@ -468,14 +607,14 @@ ${effectiveLanguage === 'hindi' ? `CRITICAL RULE: You MUST write the entire cont
 STEP 1 — Write a high-stakes, cinematic, and emotionally intense storyline about ${resolvedSubject}. Focus on deep human struggle, betrayal, legendary triumphs, or historical mystery.
 STEP 2 — Structure the script into exactly ${sceneCount} scenes. Each scene's narrationText must flow smoothly like a movie soundtrack voiceover.
 STEP 3 — For each scene's visualPrompt: answer Q1-Q5 silently, then write English-only high-fidelity prompt matching the dramatic visual beat.
-STEP 4 — Count words in the "script" field. Ensure it has a minimum of ${wordCount.split('-')[0]} words.
+STEP 4 — Count the words in the "script" field. Keep it between ${minWords} and ${maxWords}; ${maxWords} is a hard cap.
 
 JSON output:
 {
   "title": "Viral, highly intriguing ${effectiveLanguage} title",
   "subject": "${resolvedSubject}",
   "word_count_check": 0,
-  "script": "Full continuous ${effectiveLanguage} dramatic script — minimum ${wordCount.split('-')[0]} words",
+  "script": "Full continuous ${effectiveLanguage} dramatic script — ${minWords}-${maxWords} words",
   "scenes": [
     {
       "headline": "3-4 word high-impact ${effectiveLanguage} caption overlay",
@@ -525,7 +664,7 @@ FINAL REMINDER:
                 const data = await res.json();
                 const result = parseJSON(data.content[0].text);
                 console.log(`[LLM] ✅ Claude success — ${result.scenes.length} scenes, subject: ${result.subject}`);
-                return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride);
+                return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride, isCustom ? 0 : maxWords);
             }
             console.warn(`[LLM] Claude failed (${res.status}), trying Groq...`);
         } catch (e: any) {
@@ -555,7 +694,7 @@ FINAL REMINDER:
                 const data = await res.json();
                 const result = parseJSON(data.choices[0].message.content);
                 console.log(`[LLM] ✅ Groq 70b success — ${result.scenes.length} scenes`);
-                return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride);
+                return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride, isCustom ? 0 : maxWords);
             }
             console.warn(`[LLM] Groq 70b failed (${res.status}), trying 8b...`);
 
@@ -577,7 +716,7 @@ FINAL REMINDER:
                 const data = await res8b.json();
                 const result = parseJSON(data.choices[0].message.content);
                 console.log(`[LLM] ✅ Groq 8b success — ${result.scenes.length} scenes`);
-                return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride);
+                return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride, isCustom ? 0 : maxWords);
             }
             console.warn(`[LLM] Groq 8b also failed`);
         } catch (e: any) {
@@ -606,7 +745,7 @@ FINAL REMINDER:
                 const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
                 const result = parseJSON(text);
                 console.log(`[LLM] ✅ Gemini success — ${result.scenes.length} scenes`);
-                return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride);
+                return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride, isCustom ? 0 : maxWords);
             }
             console.warn(`[LLM] Gemini failed (${res.status})`);
         } catch (e: any) {
@@ -622,7 +761,8 @@ FINAL REMINDER:
             resolvedSubject,
             stylePrompt,
             visualStylePrompt,
-            visualStyleOverride
+            visualStyleOverride,
+            0, // A script the user wrote is spoken in full, however long it runs.
         );
     }
 
@@ -633,7 +773,8 @@ FINAL REMINDER:
         resolvedSubject,
         stylePrompt,
         visualStylePrompt,
-        visualStyleOverride
+        visualStyleOverride,
+        maxWords,
     );
 }
 
@@ -646,8 +787,15 @@ function enrichWithSubject(
     subject: string,
     stylePrompt: string,
     visualStylePrompt?: string,
-    visualStyleOverride?: string
+    visualStyleOverride?: string,
+    // Every provider path returns through here, so it is the one place the
+    // word budget can be applied. Pass 0 to skip — a user-supplied script must
+    // be spoken exactly as written.
+    maxWords: number = 0,
 ): GeneratedScript {
+
+    const budgeted = maxWords > 0 ? enforceWordBudget(result, maxWords) : result;
+    result = budgeted;
 
     const trimmedBase = stylePrompt.split(',').slice(0, 6).join(',');
     const trimmedSeries = visualStylePrompt
