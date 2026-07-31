@@ -7,6 +7,7 @@ import Link from "next/link";
 import { seriesStore } from "@/lib/series/seriesStore";
 import { Series, FacelessReel, ArtStyle } from "@/types/series";
 import { MUSIC_TRACKS } from "@/lib/music";
+import { VoicePicker } from "@/components/VoicePicker";
 
 
 export default function SeriesDetailPage() {
@@ -466,18 +467,13 @@ export default function SeriesDetailPage() {
                                         <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
                                             <Mic size={14} /> Voice Persona
                                         </label>
-                                        <select
+                                        {/* The account's real voices, with previews, rather than
+                                            six aliases pointing at retired voice ids. */}
+                                        <VoicePicker
                                             value={tempSeries.voiceId}
-                                            onChange={(e) => setTempSeries({ ...tempSeries, voiceId: e.target.value })}
-                                            className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-bold focus:border-indigo-500/30 outline-none transition-all cursor-pointer"
-                                        >
-                                            <option value="antoni">Antoni (Deep Narrative)</option>
-                                            <option value="bella">Bella (Soft Storyteller)</option>
-                                            <option value="arnold">Arnold (Strong Voice)</option>
-                                            <option value="josh">Josh (Energetic)</option>
-                                            <option value="v1">Narrator V1 (Balanced)</option>
-                                            <option value="v2">Narrator V2 (Calm)</option>
-                                        </select>
+                                            language={tempSeries.language}
+                                            onChange={(voiceId) => setTempSeries({ ...tempSeries, voiceId })}
+                                        />
                                     </div>
                                 </div>
 

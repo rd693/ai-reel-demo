@@ -33,10 +33,11 @@ const DEFAULT_VOICE = VOICE_MAP.storyteller;
 /** Friendly names that should map to a female voice when one is available. */
 const FEMALE_VOICE_KEYS = new Set(["bella", "rachel", "sarah", "monika"]);
 
-type AccountVoice = {
+export type AccountVoice = {
     id: string; name: string;
     language?: string; gender?: string;
     useCase?: string; descriptive?: string; age?: string; category?: string;
+    description?: string; previewUrl?: string;
 };
 
 // Voices available to this account, fetched once per process.
@@ -51,7 +52,7 @@ async function getAccountVoices(apiKey: string): Promise<AccountVoice[]> {
         if (!res.ok) throw new Error(`voices lookup failed: ${res.status}`);
         const data = await res.json();
         accountVoices = (data.voices ?? []).map(
-            (v: { voice_id: string; name: string; category?: string; labels?: Record<string, string> }) => ({
+            (v: { voice_id: string; name: string; category?: string; description?: string; preview_url?: string; labels?: Record<string, string> }) => ({
                 id: v.voice_id,
                 name: v.name,
                 language: v.labels?.language,
@@ -60,6 +61,8 @@ async function getAccountVoices(apiKey: string): Promise<AccountVoice[]> {
                 descriptive: v.labels?.descriptive,
                 age: v.labels?.age,
                 category: v.category,
+                description: v.description,
+                previewUrl: v.preview_url,
             }),
         );
     } catch (e) {
@@ -77,6 +80,11 @@ async function getAccountVoices(apiKey: string): Promise<AccountVoice[]> {
  * cannot be read off the voice list; it is only knowable by trying.
  */
 const unusableVoices = new Set<string>();
+
+/** The account's voices, for the picker. Cached with the resolver's list. */
+export async function listAccountVoices(apiKey: string): Promise<AccountVoice[]> {
+    return getAccountVoices(apiKey);
+}
 
 export function markVoiceUnusable(voiceGuid: string, reason: string) {
     if (!unusableVoices.has(voiceGuid)) {

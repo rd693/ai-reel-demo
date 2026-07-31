@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Sparkles, Wand2, Check, Music, Globe, Type, Languages } from "lucide-react";
+import { ArrowLeft, Sparkles, Wand2, Check, Globe, Type, Languages } from "lucide-react";
 import Link from "next/link";
 import { v4 as uuidv4 } from "uuid";
 import { seriesStore } from "../../../../lib/series/seriesStore";
 import { NicheType, ArtStyle, Series } from "../../../../types/series";
 import { getDefaultMusic } from "../../../../lib/music";
+import { VoicePicker } from "../../../../components/VoicePicker";
 
 const NICHES: { value: NicheType; label: string; description: string }[] = [
     { value: "mythology", label: "Mythology", description: "Ancient legends and god stories" },
@@ -37,17 +38,6 @@ const LANGUAGES = [
     { value: "french", label: "French" },
     { value: "german", label: "German" },
     { value: "hindi", label: "Hindi" }
-];
-
-const VOICES = [
-    // Ranks the account's voices by language and by how their ElevenLabs
-    // use_case tag fits the niche, so a history series gets a narrator and a
-    // Hindi series gets a Hindi voice.
-    { value: "auto", label: "Auto — match to series" },
-    { value: "antoni", label: "Antoni (Deep Narrative)" },
-    { value: "bella", label: "Bella (Soft Storyteller)" },
-    { value: "arnold", label: "Arnold (Strong Voice)" },
-    { value: "josh", label: "Josh (Energetic)" }
 ];
 
 const CAPTION_STYLES = [
@@ -356,23 +346,11 @@ export default function NewSeriesPage() {
 
                         <div>
                             <label className="block text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">Voice Character</label>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {VOICES.map(v => (
-                                    <button
-                                        key={v.value}
-                                        onClick={() => setFormData({ ...formData, voiceId: v.value })}
-                                        className={`text-left p-4 rounded-xl border transition-all ${formData.voiceId === v.value
-                                                ? "border-indigo-600 bg-indigo-50 ring-2 ring-indigo-100"
-                                                : "border-slate-200 hover:border-slate-300"
-                                            }`}
-                                    >
-                                        <div className="flex items-center gap-2 text-slate-900 font-bold">
-                                            <Music size={16} className="text-indigo-500" />
-                                            {v.label}
-                                        </div>
-                                    </button>
-                                ))}
-                            </div>
+                            <VoicePicker
+                                value={formData.voiceId}
+                                language={formData.language}
+                                onChange={(voiceId) => setFormData({ ...formData, voiceId })}
+                            />
                         </div>
 
                         <div className="flex gap-4 pt-4">
