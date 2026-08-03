@@ -5,44 +5,35 @@ export interface MusicTrack {
     category: 'cinematic' | 'ambient' | 'intense' | 'emotional';
 }
 
-export const MUSIC_TRACKS: MusicTrack[] = [
-    {
-        id: 'ambient_dream',
-        name: 'Ambient Dream',
-        url: '/music/ambient_dream.mp3',
-        category: 'ambient'
-    },
-    {
-        id: 'cinematic_tension',
-        name: 'Cinematic Tension',
-        url: '/music/cinematic_tension.mp3',
-        category: 'cinematic'
-    },
-    {
-        id: 'epic_narrative',
-        name: 'Epic Narrative',
-        url: '/music/epic_narrative.mp3',
-        category: 'cinematic'
-    },
-    {
-        id: 'dark_mystery',
-        name: 'Dark Mystery',
-        url: '/music/dark_mystery.mp3',
-        category: 'intense'
-    }
-];
+/**
+ * Background music available to reels.
+ *
+ * Deliberately empty. This shipped with four tracks named "Ambient Dream",
+ * "Cinematic Tension", "Epic Narrative" and "Dark Mystery" — all of them
+ * SoundHelix demo songs downloaded and renamed ("Ambient Dream" was really
+ * "Spy vs. Spy", a 2010 dance track). One of them drew a Content ID claim that
+ * blocked a published Short globally.
+ *
+ * Add your own licensed tracks by dropping mp3 files into public/music/ and
+ * listing them here. Music you did not license is a liability on every upload,
+ * so nothing is bundled by default.
+ */
+export const MUSIC_TRACKS: MusicTrack[] = [];
 
-export const getDefaultMusic = () => MUSIC_TRACKS[0];
+export const getDefaultMusic = (): MusicTrack | undefined => MUSIC_TRACKS[0];
 
 export const resolveTrackUrl = (trackId: string): string => {
     const track = MUSIC_TRACKS.find(t => t.id === trackId);
     if (track) return track.url;
-    
+
     // If it looks like a URL already, return it
     if (trackId.startsWith('http') || trackId.startsWith('/')) {
         return trackId;
     }
 
-    // Default fallback to first track
-    return MUSIC_TRACKS[0].url;
+    // No silent fallback to the first track. An unknown id used to mean "play
+    // whatever is first", which is exactly how a track nobody chose ends up in
+    // a published video — and a copyright claim lands on it.
+    if (trackId) console.warn(`[music] Unknown track "${trackId}"; no background music.`);
+    return "";
 };

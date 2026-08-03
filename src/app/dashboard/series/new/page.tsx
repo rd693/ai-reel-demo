@@ -85,9 +85,12 @@ export default function NewSeriesPage() {
             status: "active",
             seriesContext: formData.seriesContext || undefined,
             usePremiumImageStack: formData.usePremiumImageStack,
+            // Music is off unless you deliberately add a licensed track. It used
+            // to default on, with a bundled track, so every series published
+            // music the channel owner had never chosen or cleared.
             musicSettings: {
-                enabled: true,
-                trackId: getDefaultMusic().id,
+                enabled: false,
+                trackId: getDefaultMusic()?.id ?? "",
                 volume: 0.5
             },
             captionStyle: {

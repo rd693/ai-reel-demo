@@ -377,10 +377,16 @@ export const FacelessReelComposition = ({ reel, captionStyle, musicSettings }: P
             {/* 4. Background Music — only render if a valid http URL is configured */}
             {(() => {
                 const activeMusicSettings = musicSettings || reel.musicSettings;
-                const trackId = activeMusicSettings?.trackId;
+
+                // `enabled` was never checked, so switching background music off
+                // in series settings did nothing — the track still played, and
+                // still went out on the upload.
+                if (!activeMusicSettings?.enabled) return null;
+
+                const trackId = activeMusicSettings.trackId;
                 // Resolve the actual URL (handles local IDs vs remote URLs)
                 const resolvedUrl = trackId ? resolveTrackUrl(trackId) : "";
-                
+
                 if (!resolvedUrl) return null;
 
                 const totalFrames = Math.ceil(((timeline as any).actualDurationMs / 1000) * fps);
