@@ -6,7 +6,6 @@ import { ArrowLeft, Plus, Clock, Loader2, Video, Sparkles, Settings, Volume2, Gl
 import Link from "next/link";
 import { seriesStore } from "@/lib/series/seriesStore";
 import { Series, FacelessReel, ArtStyle } from "@/types/series";
-import { MUSIC_TRACKS } from "@/lib/music";
 import { VoicePicker } from "@/components/VoicePicker";
 
 
@@ -79,9 +78,13 @@ export default function SeriesDetailPage() {
                     boxEnabled: true,
                     yOffset: 250
                 },
+                // Music defaults off with no track. This used to default on and
+                // point at 'ambient_dream', a bundled file that turned out to be
+                // a licensed recording — so a series with no music settings
+                // silently published it.
                 musicSettings: found.musicSettings || {
-                    enabled: true,
-                    trackId: 'ambient_dream',
+                    enabled: false,
+                    trackId: '',
                     volume: 0.5
                 },
                 usePremiumImageStack: found.usePremiumImageStack || false
@@ -95,6 +98,48 @@ export default function SeriesDetailPage() {
 
         return () => { cancelled = true; };
     }, [seriesId]);
+
+    // Music library is whatever is on disk: tracks generated here plus any
+    // licensed files dropped into public/music. It used to be a hardcoded list
+    // of bundled mp3s that turned out to be someone else's recordings.
+    const [tracks, setTracks] = useState<{ id: string; name: string; url: string }[]>([]);
+    const [musicPrompt, setMusicPrompt] = useState("");
+    const [generatingMusic, setGeneratingMusic] = useState(false);
+    const [musicError, setMusicError] = useState<string | null>(null);
+
+    const loadTracks = async () => {
+        try {
+            const res = await fetch("/api/music");
+            setTracks((await res.json()).tracks ?? []);
+        } catch { /* leave the list as-is */ }
+    };
+
+    useEffect(() => { void loadTracks(); }, []);
+
+    const handleGenerateMusic = async () => {
+        if (!musicPrompt.trim()) return;
+        setGeneratingMusic(true);
+        setMusicError(null);
+        try {
+            const res = await fetch("/api/music", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: musicPrompt, durationSeconds: 22 }),
+            });
+            const track = await res.json();
+            if (!res.ok) throw new Error(track.error ?? "Generation failed");
+            await loadTracks();
+            setTempSeries((prev) => prev && ({
+                ...prev,
+                musicSettings: { ...prev.musicSettings!, enabled: true, trackId: track.id },
+            }));
+            setMusicPrompt("");
+        } catch (e) {
+            setMusicError(e instanceof Error ? e.message : "Generation failed");
+        } finally {
+            setGeneratingMusic(false);
+        }
+    };
 
     const handleSaveSettings = async () => {
         if (!tempSeries) return;
@@ -592,8 +637,37 @@ export default function SeriesDetailPage() {
                                                     <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                                                         <Volume2 size={12} /> Select Atmosphere
                                                     </div>
+
+                                                    {/* Generate an original bed instead of shipping
+                                                        someone else's recording. */}
+                                                    <div className="p-3 rounded-2xl border-2 border-dashed border-slate-200 space-y-2">
+                                                        <input
+                                                            value={musicPrompt}
+                                                            onChange={(e) => setMusicPrompt(e.target.value)}
+                                                            placeholder="e.g. slow tabla and sarangi, mournful historical underscore"
+                                                            className="w-full p-3 bg-slate-50 border-2 border-slate-100 rounded-xl text-sm font-medium outline-none focus:border-indigo-500/30"
+                                                        />
+                                                        <button
+                                                            onClick={handleGenerateMusic}
+                                                            disabled={generatingMusic || !musicPrompt.trim()}
+                                                            className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-indigo-600 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm transition-colors"
+                                                        >
+                                                            {generatingMusic
+                                                                ? <><Loader2 size={14} className="animate-spin" /> Composing…</>
+                                                                : <><Wand2 size={14} /> Generate original track</>}
+                                                        </button>
+                                                        {musicError && (
+                                                            <p className="text-xs text-red-600">{musicError}</p>
+                                                        )}
+                                                        {tracks.length === 0 && !generatingMusic && (
+                                                            <p className="text-[11px] text-slate-500 leading-relaxed">
+                                                                No tracks yet. Generate one above, or drop your own
+                                                                licensed mp3 files into <code>public/music/</code>.
+                                                            </p>
+                                                        )}
+                                                    </div>
                                                     <div className="grid grid-cols-1 gap-2">
-                                                        {MUSIC_TRACKS.map((track) => (
+                                                        {tracks.map((track) => (
                                                             <div 
                                                                 key={track.id}
                                                                 className={`flex items-center gap-3 p-3 rounded-2xl border-2 transition-all ${
@@ -610,7 +684,7 @@ export default function SeriesDetailPage() {
                                                                     className="flex-1 text-left"
                                                                 >
                                                                     <div className="text-sm font-bold text-slate-900">{track.name}</div>
-                                                                    <div className="text-[10px] text-slate-400 font-bold uppercase">{track.category}</div>
+                                                                    <div className="text-[10px] text-slate-400 font-bold uppercase">generated / added</div>
                                                                 </button>
                                                                 <button
                                                                     onClick={() => togglePreview(track.url)}

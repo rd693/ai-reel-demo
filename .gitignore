@@ -13,10 +13,14 @@ node_modules
 *.tsbuildinfo
 
 # Generated media (pipeline output, not source).
-# Inputs live in public/assets and public/music and ARE tracked.
 public/renders
 public/voiceovers
 public/uploads
+
+# Background music. Generated tracks are output, and any licensed tracks you
+# add are yours to keep out of the repo — the mp3s that used to live here were
+# someone else's recordings and drew a Content ID claim.
+public/music
 
 # Runtime state, recreated on demand by the file stores.
 # Leading slash matters: an unanchored "data" would also swallow src/data.
