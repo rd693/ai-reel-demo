@@ -4,6 +4,7 @@ import { FacelessReel } from "../types/series";
 import { createTimeline } from "../agents/timelineAgent";
 import { calculateFrameTiming } from "../lib/timing";
 import { resolveTrackUrl } from "../lib/music";
+import { kenBurns, transitionFor, transitionFrames, transitionStyle, hookScale } from "./shotMotion";
 import { resolveMediaUrl } from "../lib/media/resolveMediaUrl";
 
 
@@ -244,46 +245,45 @@ export const FacelessReelComposition = ({ reel, captionStyle, musicSettings }: P
                     const isFootage =
                         scene.backgroundType === "video" && /\.(mp4|webm|mov|m4v)(\?|$)/i.test(rawUrl ?? "");
 
-                    // --- Improved Transition Logic ---
-                    // We use zIndex and staggered visibility to ensure no black frames.
-                    // Scene i is visible from its start until scene i+1 is FULLY opaque.
-                    
-                    const FADE_FRAMES = 15; 
-                    const sceneDuration = Math.max(1, boundary.end - boundary.start);
+                    const shotFrames = Math.max(1, boundary.end - boundary.start);
+                    const framesIn = frame - boundary.start;
 
-                    // Opacity: Fade IN at the start of the scene
-                    const opacity = i === 0 
-                        ? 1 
-                        : interpolate(
-                            frame,
-                            [boundary.start, boundary.start + FADE_FRAMES],
-                            [0, 1],
-                            { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-                        );
+                    // How this shot arrives. Most boundaries are hard cuts now;
+                    // a dissolve on every one of them was what made the edit
+                    // read as a slideshow rather than a cut sequence.
+                    const kind = transitionFor(i, shotFrames);
+                    const { opacity, offsetPercent } = transitionStyle(kind, framesIn);
 
-                    // Ken Burns effect scoped to within-scene progress
-                    const progress = Math.max(0, (frame - boundary.start) / (sceneDuration + FADE_FRAMES));
-                    const scale = interpolate(progress, [0, 1.5], [1.05, 1.3]);
-                    const x = interpolate(progress, [0, 1.5], [i % 2 === 0 ? -20 : 20, i % 2 === 0 ? 20 : -20]);
-                    const y = interpolate(progress, [0, 1.5], [0, -30]);
-                    const transform = `scale(${scale}) translate(${x}px, ${y}px)`;
+                    // Ken Burns completes inside the shot, and is sized to how
+                    // the shot frames its subject. Footage carries its own
+                    // movement, so it gets none.
+                    const kb = kenBurns(scene.shotType, framesIn / shotFrames, i);
+                    const transform = isFootage
+                        ? undefined
+                        : `scale(${(kb.scale * hookScale(frame)).toFixed(4)}) ` +
+                          `translate(${kb.x.toFixed(2)}px, ${kb.y.toFixed(2)}px)`;
 
-                    // Visibility logic:
-                    // A scene is active from its boundary.start.
-                    // It stays visible until the NEXT scene has finished its fade-in (overlap period).
-                    const nextSceneStart = sceneBoundaries[i+1]?.start ?? (boundary.end + 200);
-                    const isVisible = frame >= boundary.start && frame < nextSceneStart + FADE_FRAMES;
-                    
+                    // The outgoing shot stays mounted until the incoming one has
+                    // finished arriving, so no boundary — cut included — can
+                    // expose the black underneath.
+                    const nextBoundary = sceneBoundaries[i + 1];
+                    const nextStart = nextBoundary?.start ?? (boundary.end + 200);
+                    const nextSpan = nextBoundary
+                        ? transitionFrames(transitionFor(i + 1, Math.max(1, nextBoundary.end - nextBoundary.start)))
+                        : 0;
+                    const isVisible = frame >= boundary.start && frame <= nextStart + nextSpan;
+
                     if (!isVisible) return null;
 
                     return (
                         <AbsoluteFill
                             key={`scene-bg-${scene.id || i}-${rawUrl}`}
-                            style={{ 
-                                opacity, 
+                            style={{
+                                opacity,
                                 overflow: 'hidden',
                                 zIndex: i, // Higher index scenes render on top
-                                backgroundColor: '#000'
+                                backgroundColor: '#000',
+                                transform: offsetPercent ? `translateX(${offsetPercent.toFixed(2)}%)` : undefined,
                             }}
                         >
                             {imgUrl && (isFootage ? (
