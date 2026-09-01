@@ -12,6 +12,7 @@
  */
 import { planShots, summarizeShotPlan } from "../src/lib/pipeline/shotPlan";
 import { assignShotMedia } from "../src/lib/pipeline/format";
+import { speakable, speakableDiff } from "../src/lib/audio/speakable";
 import {
     kenBurns,
     transitionFor,
@@ -103,6 +104,23 @@ check(
 );
 check("consecutive shots drift opposite ways", kenBurns("wide", 1, 0).x * kenBurns("wide", 1, 1).x < 0);
 check("the hook punch settles to neutral", hookScale(0) > 1.05 && hookScale(20) === 1);
+
+console.log("\nnarration for speech");
+{
+    // The shape a model drifts back to: ellipses as dramatic pauses, which a
+    // synthesiser reads as long dead stops.
+    const staccato = "क्षीरसागर उबल रहा था... और आकाश काँप उठा। एक ओर देवता — दूसरी ओर असुर... और बीच में लालच।";
+    const spoken = speakable(staccato);
+    const strip = (t: string) => t.replace(/[।.!?,;:\s—–…]/g, "");
+
+    check("hard pauses are removed", speakableDiff(spoken).pauses === 0, `${speakableDiff(staccato).pauses} -> 0`);
+    check("no ellipsis survives", !/\.{3,}|…/.test(spoken));
+    check("words are never changed, only punctuation", strip(staccato) === strip(spoken));
+    check("no doubled commas", !/,\s*,/.test(spoken));
+    check("no comma after a full stop", !/[।.!?]\s*,/.test(spoken));
+    check("an ellipsis after a danda becomes nothing, not a comma", !/।\s*,/.test(speakable("वह गया।... फिर लौटा।")));
+    check("empty input is safe", speakable("") === "");
+}
 
 console.log("\ncoverage");
 const starts = shots.map((s) => Math.round((s.startMs / 1000) * FPS));

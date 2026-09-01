@@ -50,7 +50,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "worker": "tsx scripts/worker.ts",
-    "check:motion": "tsx scripts/check-motion.ts"
+    "check": "tsx scripts/check-pipeline.ts"
   },
   "sideEffects": [
     "*.css"

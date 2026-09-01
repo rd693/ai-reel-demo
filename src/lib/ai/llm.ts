@@ -546,6 +546,14 @@ SCENES: ${sceneCount} exactly
 LANGUAGE: ${effectiveLanguage}
 ${effectiveLanguage === 'hindi' ? `CRITICAL RULE: You MUST write the entire continuous script, scenes headlines, title, and narrationText strictly in pure DEVANAGARI HINDI script characters only. Do NOT use Roman letters (no English alphabets expressing Hindi words like Hinglish).` : ''}
 
+NARRATION VOICE — this script is SPOKEN by one narrator, not read as captions:
+- Write connected prose. Sentences must carry forward from the one before using conjunctions and subordinate clauses (जो, जब, जिसने, क्योंकि, तब तक, इसलिए, और जैसे ही). A reader should never feel a gap between two sentences.
+- Aim for 18-25 words per sentence. Never write more than one sentence under 10 words in a row.
+- NO ellipses. Not "..." and not "…". They are read aloud as a long dead stop and make the voiceover stutter.
+- NO dashes used as dramatic pauses. Fold the thought into the sentence with a clause instead.
+- NO trailer-style fragments. "एक ओर देवता खड़े थे, दूसरी ओर असुर..." is a caption, not narration — write "एक ओर देवता खड़े थे और दूसरी ओर असुर, और दोनों के बीच अमरता का वह लालच था जिसने..." instead.
+- Read your script back as one paragraph. If it sounds like a list of dramatic images rather than a person telling a story, rewrite it.
+
 STORY DISCIPLINE — this is what decides whether anyone watches to the end:
 - ONE turning point, not a chronicle. If ${resolvedSubject} is a large epic containing many episodes, pick the SINGLE most charged episode inside it and tell only that one. Covering the whole legend end to end produces a list of events, which is the most common way this fails.
 - Name one figure whose CHOICE drives the story. Not "the gods and the demons" — one being who decides something and pays for it.
@@ -563,11 +571,11 @@ JSON output:
   "title": "Viral, highly intriguing ${effectiveLanguage} title",
   "subject": "${resolvedSubject}",
   "word_count_check": 0,
-  "script": "Full continuous ${effectiveLanguage} dramatic script — around ${targetWords} words, ending on a complete sentence",
+  "script": "Full continuous ${effectiveLanguage} script in FLOWING, CONNECTED prose — around ${targetWords} words, no ellipses, no fragments, ending on a complete sentence",
   "scenes": [
     {
       "headline": "3-4 word high-impact ${effectiveLanguage} caption overlay",
-      "narrationText": "2-3 highly dramatic, beautifully spoken ${effectiveLanguage} sentences",
+      "narrationText": "A continuous SLICE of the script above — flowing prose that carries on from the previous scene. Not a standalone dramatic line. Reading every scene back to back must reproduce the script exactly.",
       "visualPrompt": "English only, specific subject+action+location+angle+style matching the emotional intensity, max 250 chars",
       "durationInSeconds": ${sceneDuration}
     }
@@ -577,6 +585,7 @@ JSON output:
 FINAL REMINDER:
 - Exactly ${sceneCount} scenes.
 - One turning point, one deciding figure, no "and then" chains.
+- Connected prose, 18-25 words a sentence, no ellipses, no dramatic-pause dashes, no fragments.
 - Narration must sound like a cinematic documentary, not a biography.
 - All visual prompts in English, narration in ${effectiveLanguage} ${effectiveLanguage === 'hindi' ? '(MUST be pure Devanagari Hindi characters, no Roman script/English letters)' : ''}.
 `;

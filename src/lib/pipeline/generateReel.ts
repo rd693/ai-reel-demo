@@ -7,6 +7,7 @@ import { generateScriptWithAI } from "../ai/llm";
 import { generateImage } from "../visuals/imageGen";
 import { generateClip, clipProvidersAvailable, stockFootageSuits } from "../visuals/clipGen";
 import { synthesizeVoiceover } from "../audio/synthesizeVoiceover";
+import { speakable, speakableDiff } from "../audio/speakable";
 import { transcribeAudio } from "../audio/transcribe";
 import { persistMedia } from "../media/persistDataUrl";
 import { assignSceneTimings, estimateCaptionWords, resolveDurationMs } from "./timing";
@@ -146,7 +147,15 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
         if (!progress.hasVoiceover) {
             console.log(`[pipeline ${reelId}] voiceover`);
 
-            const voice = await synthesizeVoiceover(current.script, {
+            // Spoken text only — the stored script keeps its punctuation, and
+            // captions follow the synthesiser's word timings either way.
+            const spoken = speakable(current.script);
+            const diff = speakableDiff(current.script);
+            if (diff.changed) {
+                console.log(`[pipeline ${reelId}] softened ${diff.pauses} hard pause(s) for speech`);
+            }
+
+            const voice = await synthesizeVoiceover(spoken, {
                 voiceId: series.voiceId,
                 language,
                 // Niche and series blurb are what decide whether this wants a
