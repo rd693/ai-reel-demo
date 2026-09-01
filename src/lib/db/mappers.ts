@@ -6,6 +6,7 @@ import type {
 } from "../../generated/prisma/models";
 import type { ArtStyle, FacelessReel, Series } from "../../types/series";
 import type { ReelScene, UGCSceneType } from "../../types/reel";
+import { resolveFormat } from "../pipeline/format";
 
 // SQLite stores unions as TEXT and structured values as JSON TEXT. Everything
 // that crosses this boundary gets decoded here so the rest of the app keeps
@@ -58,6 +59,8 @@ export function toScene(row: SceneRow): PersistedScene {
         visualPrompt: row.visualPrompt ?? undefined,
         backgroundUrl: row.backgroundPath ?? undefined,
         backgroundType: (row.backgroundType as "image" | "video" | null) ?? undefined,
+        shotType: (row.shotType as ReelScene["shotType"] | null) ?? undefined,
+        motionPrompt: row.motionPrompt ?? undefined,
         startMs: row.startMs ?? undefined,
         endMs: row.endMs ?? undefined,
     };
@@ -81,12 +84,16 @@ export function toReel(row: ReelWithScenes): FacelessReel {
         language: row.language ?? undefined,
         artStyle: (row.artStyle as ArtStyle | null) ?? undefined,
         visualStyleOverride: row.visualStyleOverride ?? undefined,
+        format: row.format ? resolveFormat(row.format) : undefined,
         usePremiumImageStack: row.usePremiumImageStack,
         // Domain keeps the name `voiceoverUrl`; the column is a path by design.
         voiceoverUrl: row.voiceoverPath ?? undefined,
         actualDuration: row.actualDurationMs ?? undefined,
         captionWords: parseJson<unknown[]>(row.captionWords, []),
         generationStatus: row.generationStatus as FacelessReel["generationStatus"],
+        // The pipeline records why a stage failed; without this the UI could
+        // only say "failed" and never why.
+        generationError: row.generationError ?? undefined,
         status: row.generationStatus,
         musicSettings: row.musicSettings
             ? parseJson(row.musicSettings, DEFAULT_MUSIC_SETTINGS)
@@ -116,6 +123,7 @@ export function toSeries(row: SeriesWithReels): Series {
         seriesContext: row.seriesContext ?? undefined,
         visualStylePrompt: row.visualStylePrompt ?? undefined,
         usePremiumImageStack: row.usePremiumImageStack,
+        format: resolveFormat(row.format),
         status: row.status as Series["status"],
         createdAt: row.createdAt,
         reels: (row.reels ?? []).map(toReel),

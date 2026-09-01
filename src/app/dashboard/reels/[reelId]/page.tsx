@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Loader2, Video, Share2, Sparkles, Palette, Type, Check, Download, Trash2, Clock, RefreshCw } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, Video, Share2, Sparkles, Palette, Type, Check, Download, Trash2, Clock, RefreshCw, Film } from "lucide-react";
 import dynamic from "next/dynamic";
 import { seriesStore, type RenderJob } from "@/lib/series/seriesStore";
 import { resolveMediaUrl } from "@/lib/media/resolveMediaUrl";
@@ -11,6 +11,22 @@ import { createTimeline } from "@/agents/timelineAgent";
 
 const FacelessReelComposition = dynamic(() => import("@/compositions/FacelessReelComposition").then(mod => mod.FacelessReelComposition), { ssr: false });
 const Player = dynamic(() => import("@remotion/player").then(mod => mod.Player), { ssr: false });
+
+/**
+ * Stages the pipeline passes through, and what to call them. A reel opened
+ * mid-generation used to render as a player over half-written data: empty
+ * image URLs became broken thumbnails and the preview played nothing.
+ */
+/** Whether a stored background is a clip rather than a still. */
+const isFootage = (url?: string) => /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url ?? "");
+
+const GENERATION_STAGES: { key: string; label: string }[] = [
+    { key: "pending", label: "Queued" },
+    { key: "scripted", label: "Writing script" },
+    { key: "voicing", label: "Recording voiceover" },
+    { key: "visualizing", label: "Generating images" },
+    { key: "rendering", label: "Rendering video" },
+];
 
 export default function ReelDetailPage() {
     const params = useParams();
@@ -29,6 +45,9 @@ export default function ReelDetailPage() {
     // Eager asset preloader to guarantee frame-perfect visual paints and 0ms audio buffering
     useEffect(() => {
         if (!reel) return;
+        // Nothing to preload until the pipeline has finished writing assets;
+        // half the URLs would be missing and each one costs a failed request.
+        if (GENERATION_STAGES.some(s => s.key === reel.generationStatus)) return;
 
         const baseHost = window.location.origin;
         const imageUrls = reel.scenes.map((scene, i) => {
@@ -73,7 +92,11 @@ export default function ReelDetailPage() {
 
         assets.forEach(url => {
             const isAudio = url.includes('audio-proxy') || url.endsWith('.mp3') || url.endsWith('.wav') || url.startsWith('data:audio');
-            if (isAudio) {
+            // Footage is streamed by the player rather than held in memory;
+            // handing a .mp4 to `new Image()` only produces a decode error.
+            if (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(url)) {
+                handleAssetLoad();
+            } else if (isAudio) {
                 const audio = new Audio();
                 audio.src = url;
                 audio.addEventListener('canplaythrough', handleAssetLoad, { once: true });
@@ -127,6 +150,37 @@ export default function ReelDetailPage() {
 
         return () => { cancelled = true; };
     }, [reelId]);
+
+    // Generation runs on the server and survives this tab, so the page has to
+    // ask for the current state rather than assume the row it first loaded is
+    // final.
+    const stageIndex = GENERATION_STAGES.findIndex(s => s.key === reel?.generationStatus);
+    const isGenerating = stageIndex !== -1;
+
+    useEffect(() => {
+        if (!isGenerating || !reelId) return;
+
+        let cancelled = false;
+        const timer = setInterval(async () => {
+            try {
+                const fresh = await seriesStore.getReel(reelId);
+                if (!cancelled && fresh) setReel(fresh);
+            } catch {
+                // Ignore a dropped poll; the next tick retries.
+            }
+        }, 3000);
+
+        return () => { cancelled = true; clearInterval(timer); };
+    }, [reelId, isGenerating]);
+
+    const handleResume = async () => {
+        if (!reelId) return;
+        try {
+            setReel(await seriesStore.resumeGeneration(reelId));
+        } catch (e) {
+            alert(e instanceof Error ? e.message : "Failed to resume generation");
+        }
+    };
 
     const handleRenderReel = async () => {
         if (!reel || !reel.id) return;
@@ -287,8 +341,10 @@ export default function ReelDetailPage() {
                     </button>
                     <button
                         onClick={handleRenderReel}
-                        disabled={renderingStatus?.status === 'processing'}
-                        className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 text-sm ${
+                        // Exporting mid-generation would render whatever scenes
+                        // happen to exist so far.
+                        disabled={renderingStatus?.status === 'processing' || isGenerating}
+                        className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
                             renderingStatus?.status === 'completed'
                                 ? 'bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-200'
                                 : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 disabled:bg-indigo-300'
@@ -326,10 +382,56 @@ export default function ReelDetailPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
                 {/* Left Column: Player & Actions */}
-                <div className="lg:col-span-5 space-y-8">
-                    <div className="sticky top-32">
-                        <div className="bg-black rounded-[3rem] overflow-hidden shadow-[0_32px_64px_-16px_rgba(0,0,0,0.4)] w-full aspect-[9/16] border-8 border-slate-900 relative">
-                            {assetsLoaded ? (
+                <div className="lg:col-span-4 space-y-8">
+                    {/* Capped width: at 5/12 of a 6xl page the mockup filled the
+                        viewport and pushed the scene list off-screen. */}
+                    <div className="sticky top-32 max-w-[260px] mx-auto">
+                        <div className="bg-black rounded-[2rem] overflow-hidden shadow-[0_24px_48px_-16px_rgba(0,0,0,0.4)] w-full aspect-[9/16] border-4 border-slate-900 relative">
+                            {isGenerating ? (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-6 text-center">
+                                    <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-5" />
+                                    <h3 className="text-base font-bold text-white mb-4 tracking-tight">
+                                        {GENERATION_STAGES[stageIndex].label}…
+                                    </h3>
+                                    <div className="w-full space-y-1.5 text-left">
+                                        {GENERATION_STAGES.map((stage, i) => (
+                                            <div
+                                                key={stage.key}
+                                                className={`flex items-center gap-2 text-[11px] font-bold ${
+                                                    i < stageIndex ? "text-green-400"
+                                                        : i === stageIndex ? "text-white"
+                                                        : "text-slate-600"
+                                                }`}
+                                            >
+                                                {i < stageIndex
+                                                    ? <Check size={12} />
+                                                    : i === stageIndex
+                                                      ? <Loader2 size={12} className="animate-spin" />
+                                                      : <Clock size={12} />}
+                                                {stage.label}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className="text-slate-500 text-[11px] leading-relaxed font-medium mt-5">
+                                        Runs on the server — you can close this tab.
+                                    </p>
+                                </div>
+                            ) : reel.generationStatus === "failed" ? (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-6 text-center">
+                                    <h3 className="text-base font-bold text-red-400 mb-2">Generation failed</h3>
+                                    <p className="text-slate-400 text-[11px] leading-relaxed font-medium mb-5">
+                                        {reel.generationError || "The pipeline stopped before finishing."}
+                                        {" "}Resuming picks up from the last completed stage rather than
+                                        starting over.
+                                    </p>
+                                    <button
+                                        onClick={handleResume}
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2"
+                                    >
+                                        <RefreshCw size={14} /> Resume
+                                    </button>
+                                </div>
+                            ) : assetsLoaded ? (
                                 <Player
                                     key={reel.id}
                                     component={FacelessReelComposition as any}
@@ -373,26 +475,31 @@ export default function ReelDetailPage() {
                         <div className="mt-8 grid grid-cols-1 gap-3">
                             <button
                                 onClick={handleRenderReel}
-                                disabled={renderingStatus?.status === 'processing'}
-                                className={`w-full py-5 rounded-[2rem] font-black text-lg transition-all flex items-center justify-center gap-3 shadow-xl ${
+                                disabled={renderingStatus?.status === 'processing' || isGenerating}
+                                className={`w-full py-4 rounded-[1.5rem] font-black text-base transition-all flex items-center justify-center gap-3 shadow-xl disabled:opacity-50 disabled:cursor-not-allowed ${
                                     renderingStatus?.status === 'completed'
                                         ? 'bg-green-500 text-white shadow-green-100 hover:bg-green-600'
                                         : 'bg-indigo-600 text-white shadow-indigo-100 hover:bg-indigo-700 hover:scale-[1.01] active:scale-95 disabled:bg-indigo-300'
                                 }`}
                             >
-                                {renderingStatus?.status === 'processing' ? (
+                                {isGenerating ? (
                                     <>
-                                        <Loader2 size={24} className="animate-spin" />
+                                        <Loader2 size={20} className="animate-spin" />
+                                        Generating…
+                                    </>
+                                ) : renderingStatus?.status === 'processing' ? (
+                                    <>
+                                        <Loader2 size={20} className="animate-spin" />
                                         Rendering {renderingStatus.progress}%
                                     </>
                                 ) : renderingStatus?.status === 'completed' ? (
                                     <>
-                                        <CheckCircle2 size={24} />
+                                        <CheckCircle2 size={20} />
                                         Video Ready
                                     </>
                                 ) : (
                                     <>
-                                        <Sparkles size={24} />
+                                        <Sparkles size={20} />
                                         Render High Quality
                                     </>
                                 )}
@@ -421,7 +528,7 @@ export default function ReelDetailPage() {
                 </div>
 
                 {/* Right Column: Metadata & Scenes */}
-                <div className="lg:col-span-7 space-y-10 pb-20">
+                <div className="lg:col-span-8 space-y-10 pb-20">
                     {/* Header Info */}
                     <div className="space-y-4">
                         <div className="flex items-center gap-2 text-indigo-600 font-black text-xs uppercase tracking-widest">
@@ -465,14 +572,44 @@ export default function ReelDetailPage() {
                                 <div key={i} className="group bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all border-l-8 border-l-slate-50 hover:border-l-indigo-600">
                                     <div className="flex flex-col md:flex-row gap-8">
                                         <div className="w-full md:w-48 h-48 rounded-3xl overflow-hidden shadow-inner bg-slate-100 flex-shrink-0 relative">
-                                            <img 
-                                                src={resolveMediaUrl(scene.backgroundUrl, "", `${scene.id || i}&t=${Date.now()}`) ?? ""}
-                                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
-                                                alt={`Scene ${i + 1}`} 
-                                            />
+                                            {/* A scene with no image yet rendered an <img src=""> — a broken
+                                                image icon, which reads as a failure rather than as work
+                                                still in progress. */}
+                                            {scene.backgroundUrl && isFootage(scene.backgroundUrl) ? (
+                                                // A footage shot in an <img> is just a broken image icon.
+                                                <video
+                                                    src={scene.backgroundUrl}
+                                                    className="w-full h-full object-cover"
+                                                    muted
+                                                    loop
+                                                    playsInline
+                                                    onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+                                                    onMouseLeave={(e) => e.currentTarget.pause()}
+                                                />
+                                            ) : scene.backgroundUrl ? (
+                                                <img
+                                                    src={resolveMediaUrl(scene.backgroundUrl, "", `${scene.id || i}&t=${Date.now()}`) ?? ""}
+                                                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                                                    alt={`Scene ${i + 1}`}
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400">
+                                                    {isGenerating
+                                                        ? <Loader2 size={20} className="animate-spin text-indigo-500" />
+                                                        : <Palette size={20} />}
+                                                    <span className="text-[10px] font-black uppercase tracking-widest">
+                                                        {isGenerating ? "Generating" : "No image"}
+                                                    </span>
+                                                </div>
+                                            )}
                                             <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md text-white text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest">
                                                 Scene {i + 1}
                                             </div>
+                                            {scene.backgroundUrl && isFootage(scene.backgroundUrl) && (
+                                                <div className="absolute bottom-4 left-4 bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest flex items-center gap-1.5">
+                                                    <Film size={11} /> Motion
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="flex-1 space-y-6">
                                             <div>
@@ -490,7 +627,7 @@ export default function ReelDetailPage() {
                                                     </label>
                                                     <button
                                                         onClick={() => handleRegenerate(i)}
-                                                        disabled={regeneratingIndex === i}
+                                                        disabled={regeneratingIndex === i || isGenerating}
                                                         className="flex items-center gap-1.5 text-[10px] font-black text-indigo-600 hover:text-indigo-700 disabled:text-indigo-300 transition-colors uppercase tracking-widest"
                                                     >
                                                         {regeneratingIndex === i ? (

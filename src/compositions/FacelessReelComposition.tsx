@@ -1,5 +1,5 @@
 import { useMemo, useEffect } from "react";
-import { AbsoluteFill, Sequence, Audio, useVideoConfig, Img, useCurrentFrame, spring, interpolate } from "remotion";
+import { AbsoluteFill, Sequence, Audio, useVideoConfig, Img, OffthreadVideo, useCurrentFrame, spring, interpolate } from "remotion";
 import { FacelessReel } from "../types/series";
 import { createTimeline } from "../agents/timelineAgent";
 import { calculateFrameTiming } from "../lib/timing";
@@ -237,6 +237,13 @@ export const FacelessReelComposition = ({ reel, captionStyle, musicSettings }: P
                     const baseHost = (reel as any).baseHost || "";
                     const imgUrl = resolveMediaUrl(rawUrl, baseHost, scene.id || i);
 
+                    // Branch on the asset that actually exists, not on what the
+                    // planner intended. A shot marked for motion whose clip has
+                    // not been generated still holds a still, and must render as
+                    // one rather than as an empty video element.
+                    const isFootage =
+                        scene.backgroundType === "video" && /\.(mp4|webm|mov|m4v)(\?|$)/i.test(rawUrl ?? "");
+
                     // --- Improved Transition Logic ---
                     // We use zIndex and staggered visibility to ensure no black frames.
                     // Scene i is visible from its start until scene i+1 is FULLY opaque.
@@ -279,7 +286,23 @@ export const FacelessReelComposition = ({ reel, captionStyle, musicSettings }: P
                                 backgroundColor: '#000'
                             }}
                         >
-                            {imgUrl && (
+                            {imgUrl && (isFootage ? (
+                                <OffthreadVideo
+                                    src={imgUrl}
+                                    // Footage carries its own movement, so the Ken
+                                    // Burns transform is dropped here — layering a
+                                    // push on top of a moving shot reads as drift.
+                                    style={{
+                                        width: "100%",
+                                        height: "100%",
+                                        objectFit: "cover",
+                                        filter: 'brightness(1.1) contrast(1.05)',
+                                    }}
+                                    // Clips are usually longer than the shot; play
+                                    // from the top and let the shot boundary cut it.
+                                    muted
+                                />
+                            ) : (
                                 <SafeImg
                                     src={imgUrl}
                                     sceneId={scene.id}
@@ -291,7 +314,7 @@ export const FacelessReelComposition = ({ reel, captionStyle, musicSettings }: P
                                         filter: 'brightness(1.1) contrast(1.05)',
                                     }}
                                 />
-                            )}
+                            ))}
                         </AbsoluteFill>
                     );
                 })}

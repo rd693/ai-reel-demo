@@ -35,6 +35,8 @@ model Series {
   targetDuration       Int     @default(60) // seconds
   frequency            String  @default("manual") // daily | weekly | manual
   usePremiumImageStack Boolean @default(false)
+  // slideshow | hybrid | motion — what fills each shot. See src/lib/pipeline/format.ts
+  format               String  @default("slideshow")
   seriesContext        String?
   visualStylePrompt    String?
 
@@ -66,6 +68,7 @@ model Reel {
   artStyle             String?
   visualStyleOverride  String?
   usePremiumImageStack Boolean @default(false)
+  format               String? // overrides the series format when set
   seed                 Int?
 
   // Path under public/, e.g. /voiceovers/voice-123.mp3 — never a data URL.
@@ -108,6 +111,11 @@ model Scene {
 
   backgroundPath String? // path under public/, or a remote URL for generated images
   backgroundType String? @default("image") // image | video
+
+  // Set by the shot planner: how this shot frames the subject, and — for a
+  // motion shot — what the clip should actually do.
+  shotType     String? // wide | medium | close | detail
+  motionPrompt String?
 
   durationInSeconds Float @default(3)
 

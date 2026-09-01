@@ -2,12 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Plus, Clock, Loader2, Video, Sparkles, Settings, Volume2, Globe, Palette, Type, Trash2, X, Mic, Edit, Wand2, Calendar, Layout } from "lucide-react";
+import { ArrowLeft, Plus, Clock, Loader2, Video, Sparkles, Settings, Volume2, Globe, Palette, Type, Trash2, X, Mic, Edit, Wand2, Calendar, Layout, Film } from "lucide-react";
 import Link from "next/link";
 import { seriesStore } from "@/lib/series/seriesStore";
 import { Series, FacelessReel, ArtStyle } from "@/types/series";
 import { VoicePicker } from "@/components/VoicePicker";
+import { REEL_FORMATS, FORMAT_LABELS, FORMAT_DESCRIPTIONS, type ReelFormat } from "@/lib/pipeline/format";
 
+
+/** In-progress stages, and what to call them in the UI. */
+const STAGE_LABELS: Record<string, string> = {
+    pending: "Queued",
+    scripted: "Writing script",
+    voicing: "Recording voiceover",
+    visualizing: "Generating images",
+    rendering: "Rendering video",
+};
 
 export default function SeriesDetailPage() {
     const params = useParams();
@@ -87,7 +97,8 @@ export default function SeriesDetailPage() {
                     trackId: '',
                     volume: 0.5
                 },
-                usePremiumImageStack: found.usePremiumImageStack || false
+                usePremiumImageStack: found.usePremiumImageStack || false,
+                format: found.format || "slideshow"
             };
             setSeries(enrichedSeries);
             setTempSeries(enrichedSeries);
@@ -419,17 +430,39 @@ export default function SeriesDetailPage() {
                     <div key={idx} className="group bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all overflow-hidden">
                         <div className="px-6 py-4 flex items-center justify-between gap-4">
                             <div className="flex items-center gap-4 min-w-0">
-                                <div className="bg-slate-50 group-hover:bg-indigo-50 p-3 rounded-xl text-slate-400 group-hover:text-indigo-600 transition-colors flex-shrink-0">
-                                    <Video size={20} />
+                                <div className={`p-3 rounded-xl transition-colors flex-shrink-0 ${
+                                    STAGE_LABELS[reel.generationStatus]
+                                        ? "bg-indigo-50 text-indigo-600"
+                                        : reel.generationStatus === "failed"
+                                          ? "bg-red-50 text-red-500"
+                                          : "bg-slate-50 group-hover:bg-indigo-50 text-slate-400 group-hover:text-indigo-600"
+                                }`}>
+                                    {STAGE_LABELS[reel.generationStatus]
+                                        ? <Loader2 size={20} className="animate-spin" />
+                                        : <Video size={20} />}
                                 </div>
                                 <div className="min-w-0">
                                     <h3 className="font-black text-slate-900 truncate text-base">{reel.businessName || "Untitled Reel"}</h3>
                                     <div className="flex flex-wrap items-center gap-3 text-xs font-medium text-slate-400 mt-0.5">
-                                        <span className="flex items-center gap-1"><Calendar size={12} /> {new Date(reel.createdAt || "").toLocaleDateString()}</span>
-                                        <span>·</span>
-                                        <span className="text-indigo-500 flex items-center gap-1"><Sparkles size={12} /> {reel.scenes.length} Scenes</span>
-                                        <span>·</span>
-                                        <span className="capitalize flex items-center gap-1"><Palette size={12} /> {reel.artStyle?.replace(/_/g, ' ')}</span>
+                                        {/* While the pipeline is running, say which stage it is on
+                                            instead of showing a scene count that is still climbing. */}
+                                        {STAGE_LABELS[reel.generationStatus] ? (
+                                            <span className="text-indigo-600 font-bold flex items-center gap-1">
+                                                {STAGE_LABELS[reel.generationStatus]}
+                                                {reel.generationStatus === "visualizing" &&
+                                                    ` — ${reel.scenes.filter(s => s.backgroundUrl).length}/${reel.scenes.length} images`}
+                                            </span>
+                                        ) : reel.generationStatus === "failed" ? (
+                                            <span className="text-red-600 font-bold">Failed — open to retry</span>
+                                        ) : (
+                                            <>
+                                                <span className="flex items-center gap-1"><Calendar size={12} /> {new Date(reel.createdAt || "").toLocaleDateString()}</span>
+                                                <span>·</span>
+                                                <span className="text-indigo-500 flex items-center gap-1"><Sparkles size={12} /> {reel.scenes.length} Scenes</span>
+                                                <span>·</span>
+                                                <span className="capitalize flex items-center gap-1"><Palette size={12} /> {reel.artStyle?.replace(/_/g, ' ')}</span>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -611,6 +644,35 @@ export default function SeriesDetailPage() {
                                                 <div className={`absolute top-1.5 w-5 h-5 bg-white rounded-full transition-all shadow-md ${tempSeries.usePremiumImageStack ? 'left-7.5' : 'left-1.5'}`} />
                                             </button>
                                         </div>
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 space-y-4">
+                                    <label className="text-xs font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest ml-1">
+                                        <Film size={14} /> Shot Format
+                                    </label>
+                                    <div className="grid grid-cols-1 gap-3">
+                                        {REEL_FORMATS.map((option) => {
+                                            const active = (tempSeries.format ?? "slideshow") === option;
+                                            return (
+                                                <button
+                                                    key={option}
+                                                    onClick={() => setTempSeries({ ...tempSeries, format: option as ReelFormat })}
+                                                    className={`text-left p-5 rounded-[2rem] border-2 transition-all ${
+                                                        active
+                                                            ? "border-indigo-600 bg-indigo-50"
+                                                            : "border-slate-100 bg-slate-50 hover:border-slate-200"
+                                                    }`}
+                                                >
+                                                    <span className={`text-base font-black block ${active ? "text-indigo-700" : "text-slate-800"}`}>
+                                                        {FORMAT_LABELS[option]}
+                                                    </span>
+                                                    <span className="text-[11px] text-slate-400 font-bold block mt-1 leading-relaxed">
+                                                        {FORMAT_DESCRIPTIONS[option]}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
 

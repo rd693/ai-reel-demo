@@ -31,9 +31,14 @@ export const resolveTrackUrl = (trackId: string): string => {
         return trackId;
     }
 
-    // No silent fallback to the first track. An unknown id used to mean "play
+    // Tracks in public/music are identified by filename stem, and the library is
+    // read from disk rather than from MUSIC_TRACKS. Emptying that list left this
+    // lookup with nothing to match, so a generated track that was selected and
+    // saved correctly still resolved to "" and played nothing.
+    if (trackId) return `/music/${trackId}.mp3`;
+
+    // No silent fallback to a default track: an unknown id used to mean "play
     // whatever is first", which is exactly how a track nobody chose ends up in
-    // a published video — and a copyright claim lands on it.
-    if (trackId) console.warn(`[music] Unknown track "${trackId}"; no background music.`);
+    // a published video, with a copyright claim behind it.
     return "";
 };

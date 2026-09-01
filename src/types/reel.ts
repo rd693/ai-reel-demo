@@ -23,6 +23,11 @@ export type ReelScene = {
     backgroundAssetId?: string;
     visualPrompt?: string;
 
+    /** How this shot frames its subject. Set by the shot planner. */
+    shotType?: "wide" | "medium" | "close" | "detail";
+    /** What should move, for a shot rendered as footage rather than a still. */
+    motionPrompt?: string;
+
     /** Line spoken over this scene; drives both captions and scene length. */
     narrationText?: string;
 

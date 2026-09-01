@@ -19,6 +19,7 @@ function toRow(input: SeriesInput) {
         targetDuration: input.targetDuration,
         frequency: input.frequency,
         usePremiumImageStack: input.usePremiumImageStack ?? false,
+        format: input.format ?? "slideshow",
         seriesContext: input.seriesContext ?? null,
         visualStylePrompt: input.visualStylePrompt ?? null,
         targetPlatforms: JSON.stringify(input.targetPlatforms ?? []),
@@ -69,7 +70,7 @@ export const seriesRepo = {
         const scalar = [
             "name", "niche", "artStyle", "voiceId", "language",
             "targetDuration", "frequency", "usePremiumImageStack",
-            "seriesContext", "visualStylePrompt",
+            "seriesContext", "visualStylePrompt", "format",
         ] as const;
         for (const key of scalar) {
             if (patch[key] !== undefined) data[key] = patch[key];

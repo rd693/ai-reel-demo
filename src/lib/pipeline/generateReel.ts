@@ -5,10 +5,13 @@ import { prisma } from "../db/client";
 import { reelRepo } from "../db/reelRepo";
 import { generateScriptWithAI } from "../ai/llm";
 import { generateImage } from "../visuals/imageGen";
+import { generateClip, clipProvidersAvailable, stockFootageSuits } from "../visuals/clipGen";
 import { synthesizeVoiceover } from "../audio/synthesizeVoiceover";
 import { transcribeAudio } from "../audio/transcribe";
 import { persistMedia } from "../media/persistDataUrl";
 import { assignSceneTimings, estimateCaptionWords, resolveDurationMs } from "./timing";
+import { planShots, summarizeShotPlan } from "./shotPlan";
+import { assignShotMedia, resolveFormat } from "./format";
 
 // Reported stages, in order. These drive the UI only.
 export const STAGES = ["pending", "scripted", "voicing", "visualizing", "completed"] as const;
@@ -88,6 +91,7 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
     const language = row.language ?? series.language;
     const artStyle = options.artStyle ?? row.artStyle ?? series.artStyle;
     const usePremium = row.usePremiumImageStack || series.usePremiumImageStack;
+    const format = resolveFormat(row.format, series.format);
     const targetDuration = series.targetDuration || 60;
 
     const progress = inspect(row);
@@ -178,10 +182,20 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
             const captionWords = words ?? estimateCaptionWords(current.script, durationMs);
             const timed = assignSceneTimings(current.scenes, captionWords, durationMs);
 
+            // Beats become shots here, once the real audio length is known.
+            // Doing it earlier would cut against an estimate, and the estimate
+            // is routinely 30% out.
+            const shots = assignShotMedia(planShots(timed, captionWords), format);
+            const motionCount = shots.filter((s) => s.backgroundType === "video").length;
+            console.log(
+                `[pipeline ${reelId}] shot plan — ${timed.length} beats → ${summarizeShotPlan(shots)}; ` +
+                    `format ${format}, ${motionCount} motion shot(s)`,
+            );
+
             await reelRepo.update(reelId, {
                 actualDuration: durationMs,
                 captionWords,
-                scenes: timed,
+                scenes: shots,
             });
             await reelRepo.setStatus(reelId, "voicing");
         }
@@ -196,13 +210,32 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
             const seed = current.seed ?? Math.floor(Math.random() * 2147483647);
             const scenes = [...current.scenes];
 
+            // Checked once rather than per shot: with no provider configured a
+            // motion reel would otherwise make the same futile call 30 times.
+            const canAnimate = clipProvidersAvailable(usePremium);
+            const motionWanted = scenes.filter((s) => s.backgroundType === "video").length;
+            if (motionWanted > 0 && !canAnimate) {
+                console.warn(
+                    `[pipeline ${reelId}] ${motionWanted} shots want motion but no clip provider is configured ` +
+                        `(needs FAL_KEY with the premium stack, or PEXELS_API_KEY/PIXABAY_API_KEY). Rendering stills.`,
+                );
+            } else if (motionWanted > 0 && !usePremium && !stockFootageSuits(artStyle)) {
+                console.warn(
+                    `[pipeline ${reelId}] stock footage does not suit the "${artStyle}" style, and the premium ` +
+                        `stack is off. Rendering stills.`,
+                );
+            }
+
             for (let i = 0; i < scenes.length; i++) {
                 // Already-generated scenes are skipped, so a retry only pays for
                 // the images that are actually missing.
                 if (scenes[i].backgroundUrl) continue;
 
                 const prompt = scenes[i].visualPrompt || scenes[i].narrationText || series.niche;
-                console.log(`[pipeline ${reelId}] image ${i + 1}/${scenes.length}`);
+                console.log(
+                    `[pipeline ${reelId}] image ${i + 1}/${scenes.length}` +
+                        (scenes[i].backgroundType === "video" ? " (motion shot — still is the source frame)" : ""),
+                );
 
                 try {
                     const url = await generateImage({
@@ -213,7 +246,40 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                     });
                     // Copy onto local disk so the reel does not depend on a
                     // third-party host still serving the file at render time.
-                    scenes[i] = { ...scenes[i], backgroundUrl: await persistMedia(url, "uploads") };
+                    let background = await persistMedia(url, "uploads");
+                    let backgroundType = scenes[i].backgroundType;
+
+                    // Motion is generated here, while the *generator's* URL is
+                    // still in hand. Image-to-video has to fetch the source
+                    // frame itself, and by the next line the only copy is a path
+                    // under public/ that resolves to nothing from outside this
+                    // machine.
+                    if (backgroundType === "video" && canAnimate) {
+                        const remoteStill = typeof url === "string" && url.startsWith("http") ? url : undefined;
+                        const clip = await generateClip({
+                            prompt: scenes[i].motionPrompt || prompt,
+                            imageUrl: remoteStill,
+                            visualPrompt: scenes[i].visualPrompt,
+                            durationSeconds: scenes[i].durationInSeconds ?? 3,
+                            artStyle,
+                            usePremium,
+                        });
+
+                        if (clip) {
+                            const stored = await persistMedia(clip.url, "uploads");
+                            if (stored) {
+                                background = stored;
+                                console.log(`[pipeline ${reelId}] shot ${i + 1} animated via ${clip.source}`);
+                            }
+                        } else {
+                            // Say so in the data rather than leaving a shot
+                            // labelled as footage that is really a still.
+                            backgroundType = "image";
+                            console.log(`[pipeline ${reelId}] shot ${i + 1} stays a still — no clip produced`);
+                        }
+                    }
+
+                    scenes[i] = { ...scenes[i], backgroundUrl: background, backgroundType };
                 } catch (e) {
                     console.warn(`[pipeline ${reelId}] image ${i + 1} failed:`, e);
                     continue;

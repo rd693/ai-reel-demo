@@ -1,4 +1,5 @@
 import { ReelData, ReelScene } from "./reel";
+import type { ReelFormat } from "@/lib/pipeline/format";
 
 export type NicheType = string;
 
@@ -38,6 +39,7 @@ export interface Series {
     seriesContext?: string;
     visualStylePrompt?: string; // ✅ Series-level visual style
     usePremiumImageStack?: boolean; // ✅ Paid/Free stack toggle
+    format?: ReelFormat; // stills, mixed, or motion — see src/lib/pipeline/format.ts
     captionStyle: {
         // Canonical values. Older rows may hold "double"/"split"/"line";
         // normalizeCaptionType in the composition maps those on read.
@@ -66,7 +68,9 @@ export interface FacelessReel extends ReelData {
     language?: string; // ✅ Language
     artStyle?: ArtStyle; // ✅ Per-reel visual style override
     visualStyleOverride?: string; // ✅ Per-reel visual prompt override
+    format?: ReelFormat; // overrides the series format when set
     generationStatus: "pending" | "scripted" | "voicing" | "visualizing" | "rendering" | "completed" | "failed";
+    generationError?: string; // Why the pipeline stopped, when generationStatus is "failed"
     scheduledFor?: Date;
     publishedAt?: Date;
     musicSettings?: Series['musicSettings'];
