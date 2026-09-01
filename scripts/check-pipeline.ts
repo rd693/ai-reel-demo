@@ -13,6 +13,7 @@
 import { planShots, summarizeShotPlan, stripCameraAngle } from "../src/lib/pipeline/shotPlan";
 import { assignShotMedia } from "../src/lib/pipeline/format";
 import { speakable, speakableDiff } from "../src/lib/audio/speakable";
+import { imageSubject } from "../src/lib/ai/llm";
 import {
     kenBurns,
     transitionFor,
@@ -104,6 +105,17 @@ check(
 );
 check("consecutive shots drift opposite ways", kenBurns("wide", 1, 0).x * kenBurns("wide", 1, 1).x < 0);
 check("the hook punch settles to neutral", hookScale(0) > 1.05 && hookScale(20) === 1);
+
+console.log("\nimage subject");
+{
+    // Exactly what was typed for the Eklavya reel, after Hindi is stripped.
+    check("a possessed noun reduces to its owner", imageSubject("— Eklavya's thumb.") === "Eklavya", imageSubject("— Eklavya's thumb."));
+    check("a leading dash is dropped", !imageSubject("— Maharana Pratap").startsWith("—"));
+    check("a title clause is cut at the dash", imageSubject("Samudra Manthan — the churning of the ocean") === "Samudra Manthan");
+    check("a plain name is left alone", imageSubject("Chhatrapati Shivaji") === "Chhatrapati Shivaji");
+    check("a curly apostrophe works too", imageSubject("Karna\u2019s armour") === "Karna");
+    check("empty input is safe", imageSubject("") === "");
+}
 
 console.log("\nshot framing");
 {

@@ -30,6 +30,29 @@ function sanitizeVisualPrompt(prompt: string): string {
         .trim();
 }
 
+/**
+ * Reduces a subject line to the entity an image should depict.
+ *
+ * What the user types is a title, not an image subject. "एकलव्य का अंगूठा —
+ * Eklavya's thumb." sanitises to "— Eklavya's thumb." and was prepended
+ * verbatim to all 25 visual prompts, priming every one of them toward
+ * anatomy — which is how a reel ends up with prompts a safety classifier
+ * refuses. The possessed noun belongs to the story; the image wants the owner.
+ */
+export function imageSubject(subject: string): string {
+    let out = subject
+        .replace(/^[^\p{L}\p{N}]+/u, "")   // leading dashes and punctuation
+        .replace(/[.\s]+$/u, "")            // trailing period
+        .trim();
+
+    // "Eklavya's thumb" -> "Eklavya". Keep the possessor, drop what is possessed.
+    const possessive = out.match(/^(.*?)['\u2019]s\s+\S/u);
+    if (possessive?.[1]?.trim()) out = possessive[1].trim();
+
+    // A title that is still a whole clause is no use as an image subject.
+    return out.split(/\s*[—–:|]\s*/u)[0].trim();
+}
+
 // ─────────────────────────────────────────────────────────────
 // AUTO LANGUAGE DETECTION — force Hindi for Indian subjects
 // ─────────────────────────────────────────────────────────────
@@ -265,6 +288,21 @@ VISUAL PROMPT HARD RULES:
 - Must include: subject name + specific action + named location + camera angle + art style
 - NEVER: "dramatic scene", "important moment", "historical setting", "ancient times"
 - ALWAYS: specific named people, specific named places, specific physical action
+
+VIOLENCE — SHOW THE CONSEQUENCE, NEVER THE INJURY:
+Stories worth telling turn on loss, and the image generator refuses graphic
+prompts outright: it answers with a blank frame, which becomes a black shot in
+the finished reel. So never describe a wound, a severed or missing body part,
+blood, mutilation, a corpse, or the moment of a blow landing.
+Depict the same beat through what surrounds it — that is also the better shot:
+  - NOT "extreme close-up of a severed right thumb lying in the dirt"
+    BUT "a bow lying unstrung in the dirt beside a bloodless empty palm pressed to the earth"
+  - NOT "sword slicing through the warrior's neck"
+    BUT "a raised sword frozen at the top of its arc, the crowd's faces turned away"
+  - NOT "the king's mutilated body on the battlefield"
+    BUT "an abandoned crown half-sunk in mud, smoke drifting across an emptied field"
+Show the object, the aftermath, the witness's face, the empty space where
+something was. Never the anatomy and never the impact.
 `;
 
     // ─────────────────────────────────────────────────────────
@@ -798,7 +836,7 @@ function enrichWithSubject(
             // into prompts that Step 1 had just stripped it out of, sending
             // "महाराणा प्रताप, Maharana Pratap on horseback..." to an image
             // model that only reads English.
-            const promptableSubject = sanitizeVisualPrompt(subject);
+            const promptableSubject = imageSubject(sanitizeVisualPrompt(subject));
             if (
                 promptableSubject &&
                 !prompt.toLowerCase().includes(promptableSubject.toLowerCase())
