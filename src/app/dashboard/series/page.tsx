@@ -6,6 +6,7 @@ import { Plus, Play, Pause, Layers, Trash2, ChevronRight, Film, Clock, FolderOpe
 import { seriesStore } from "../../../lib/series/seriesStore";
 import { Series, NicheType } from "../../../types/series";
 import { countLegacySeries, importLegacyData } from "../../../lib/series/legacyImport";
+import { VoiceQuota } from "../../../components/VoiceQuota";
 
 const NICHE_LABELS: Record<NicheType, string> = {
     mythology: "Mythology",
@@ -134,7 +135,8 @@ export default function SeriesDashboardPage() {
                     <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Content Series</h1>
                     <p className="text-slate-500 mt-1 text-sm">Manage your automated video channels</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                    <VoiceQuota />
                     <Link
                         href="/dashboard/assets"
                         className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl font-semibold transition-colors shadow-sm text-sm"
