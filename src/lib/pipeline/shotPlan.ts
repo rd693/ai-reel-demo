@@ -51,6 +51,35 @@ const SHOT_TYPE_PROMPTS: Record<ShotType, string> = {
     detail: "Extreme close-up of one telling detail in the scene — a hand, an object, a texture — the figures out of frame",
 };
 
+/**
+ * Camera language the writer may already have put in the prompt.
+ *
+ * llm.ts injects an angle when the model omits one, and it guards against
+ * doubling up — but that guard runs before a beat is split, so prepending shot
+ * framing here sailed straight past it. The result was prompts carrying two
+ * conflicting camera directions ("wide establishing shot ... extreme close-up
+ * of a hand"), which is how a reel ends up with shots that ignore their own
+ * framing.
+ */
+const ANGLE_PHRASES = [
+    "wide establishing shot", "aerial wide shot", "extreme close-up", "extreme close up",
+    "over-the-shoulder shot", "over the shoulder shot", "low angle heroic shot",
+    "medium wide shot", "medium shot", "close-up portrait", "close-up", "close up",
+    "wide shot", "low angle", "aerial", "establishing shot", "action shot",
+];
+
+/** Removes a camera direction the writer already supplied, with its clause. */
+export function stripCameraAngle(prompt: string): string {
+    const clauses = prompt.split(",");
+    const kept = clauses.filter((clause) => {
+        const c = clause.toLowerCase().trim();
+        return !ANGLE_PHRASES.some((phrase) => c.startsWith(phrase));
+    });
+    // Never strip everything: a prompt that was only a camera direction keeps
+    // whatever it had rather than becoming empty.
+    return (kept.length ? kept : clauses).join(",").replace(/\s*,\s*,/g, ",").trim();
+}
+
 export type Beat = {
     id?: string;
     narrationText?: string;
@@ -184,7 +213,10 @@ export function planShots<T extends Beat>(
                 // so the prompt is re-framed rather than replaced — but the
                 // re-framing has to come first to survive the scene
                 // description that follows it.
-                visualPrompt: count === 1 ? basePrompt : `${SHOT_TYPE_PROMPTS[shotType]}. ${basePrompt}`,
+                visualPrompt:
+                    count === 1
+                        ? basePrompt
+                        : `${SHOT_TYPE_PROMPTS[shotType]}, ${stripCameraAngle(basePrompt)}`,
                 shotType,
                 startMs,
                 endMs,

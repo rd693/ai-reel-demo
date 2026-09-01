@@ -444,6 +444,17 @@ async function generateWithFal(args: {
         const data = await response.json();
         const url = data.images?.[0]?.url;
 
+        // A flagged image is not an error response — fal returns 200 with a
+        // solid black PNG, always the same ~13.5KB of bytes. Taken at face
+        // value it is stored as a finished shot, and the reel plays a black
+        // frame with narration over it. Returning null instead lets the
+        // provider ladder fall through to a generator that will render
+        // something.
+        if (data.has_nsfw_concepts?.[0] === true) {
+            console.warn("[ImageGen] fal.ai flagged this prompt; discarding the blank it returned");
+            return null;
+        }
+
         if (typeof url === "string") {
             console.log("[ImageGen] ✅ fal.ai success:", url);
             return url;

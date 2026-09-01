@@ -25,6 +25,29 @@ export type Stage = (typeof STAGES)[number];
 // status is a label.
 type Progress = { hasScript: boolean; hasVoiceover: boolean; missingImages: number };
 
+/**
+ * Smallest plausible generated still.
+ *
+ * A safety-filtered generation is not an error: fal answers 200 with a solid
+ * black PNG, ~13.5KB of it, and stored as-is that becomes a black frame with
+ * narration playing over it. Real art at this resolution runs 400-600KB. The
+ * flag is checked first (see imageGen), but the backup model does not always
+ * report one, so size is the backstop — the same reasoning as
+ * MIN_VOICEOVER_BYTES, where a silent 251-byte MP3 passed for audio.
+ */
+const MIN_IMAGE_BYTES = 40_000;
+
+async function looksGenerated(publicPath: string | undefined): Promise<boolean> {
+    if (!publicPath) return false;
+    if (!publicPath.startsWith("/")) return true; // still on the generator's host
+    try {
+        const { size } = await fs.stat(path.join(process.cwd(), "public", publicPath));
+        return size >= MIN_IMAGE_BYTES;
+    } catch {
+        return false;
+    }
+}
+
 function inspect(reel: {
     script: string;
     voiceoverPath: string | null;
@@ -263,6 +286,16 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                     // third-party host still serving the file at render time.
                     let background = await persistMedia(url, "uploads");
                     let backgroundType = scenes[i].backgroundType;
+
+                    // Leaving a blank on the row would mark the shot finished
+                    // and the reel complete. Dropping it means the shot shows
+                    // as missing and Resume regenerates just that one.
+                    if (!(await looksGenerated(background))) {
+                        console.warn(
+                            `[pipeline ${reelId}] shot ${i + 1} came back blank (likely a content filter); leaving it unset`,
+                        );
+                        continue;
+                    }
 
                     // Motion is generated here, while the *generator's* URL is
                     // still in hand. Image-to-video has to fetch the source

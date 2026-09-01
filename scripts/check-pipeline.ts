@@ -10,7 +10,7 @@
  * the edit still looked like a slideshow. And the shot list has to tile the
  * audio exactly: a gap of one frame is a black flash in the finished video.
  */
-import { planShots, summarizeShotPlan } from "../src/lib/pipeline/shotPlan";
+import { planShots, summarizeShotPlan, stripCameraAngle } from "../src/lib/pipeline/shotPlan";
 import { assignShotMedia } from "../src/lib/pipeline/format";
 import { speakable, speakableDiff } from "../src/lib/audio/speakable";
 import {
@@ -104,6 +104,25 @@ check(
 );
 check("consecutive shots drift opposite ways", kenBurns("wide", 1, 0).x * kenBurns("wide", 1, 1).x < 0);
 check("the hook punch settles to neutral", hookScale(0) > 1.05 && hookScale(20) === 1);
+
+console.log("\nshot framing");
+{
+    // What llm.ts actually produces: the writer's angle already baked in.
+    const written = "Eklavya's thumb., Extreme close-up on hands, cinematic 3D render, ultra detailed, no text";
+    const stripped = stripCameraAngle(written);
+    check("an angle the writer supplied is removed", !/extreme close-up/i.test(stripped), stripped.slice(0, 46));
+    check("the rest of the prompt survives", /cinematic 3D render/.test(stripped) && /Eklavya/.test(stripped));
+
+    const split = planShots(
+        [{ id: "b", narrationText: "a ".repeat(30), visualPrompt: written, startMs: 0, endMs: 9000 }],
+        undefined,
+    );
+    check("a split beat carries exactly one camera direction", split.every(sh => {
+        const hits = (sh.visualPrompt!.toLowerCase().match(/close-up|wide shot|medium shot|establishing|aerial/g) ?? []).length;
+        return hits === 1;
+    }), split.map(sh => (sh.visualPrompt ?? "").split(",")[0]).join(" | ").slice(0, 78));
+    check("a prompt that is only an angle is not emptied", stripCameraAngle("wide establishing shot").length > 0);
+}
 
 console.log("\nnarration for speech");
 {
