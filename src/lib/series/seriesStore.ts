@@ -114,9 +114,11 @@ export const seriesStore = {
 
     async getRenderJob(reelId: string): Promise<RenderJob | null> {
         const res = await fetch(`/api/render?reelId=${reelId}`);
+        // 404 is still accepted so a page loaded before the server reloaded
+        // keeps working against the older contract.
         if (res.status === 404) return null;
         if (!res.ok) throw new Error("Failed to read render job");
-        return res.json();
+        return (await res.json()) ?? null;
     },
 };
 

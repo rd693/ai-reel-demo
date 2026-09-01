@@ -101,7 +101,11 @@ export async function GET(req: Request) {
               ? await renderJobRepo.latestForReel(reelId)
               : null;
 
-        if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+        // A reel that has never been exported has no job, and that is a normal
+        // answer rather than a missing resource — the reel page polls this on
+        // every load to catch a render already in flight. Returning 404 made
+        // the ordinary case look like a failure in the network tab.
+        if (!job) return NextResponse.json(null);
         return NextResponse.json(job);
     } catch (error) {
         console.error("[api/render] status lookup failed:", error);
