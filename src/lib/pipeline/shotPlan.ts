@@ -36,11 +36,19 @@ export type ShotType = "wide" | "medium" | "close" | "detail";
  */
 const SHOT_CYCLE: ShotType[] = ["wide", "medium", "close", "detail"];
 
+/**
+ * Framing, written to change *what is depicted*, not only how it is framed.
+ *
+ * These go at the FRONT of the prompt. Appended to the end of a 200-character
+ * scene description they had no visible effect: image models weight early
+ * tokens far more heavily, so four shots of one beat came back as the same
+ * picture four times.
+ */
 const SHOT_TYPE_PROMPTS: Record<ShotType, string> = {
-    wide: "wide establishing shot, subject small against the environment",
-    medium: "medium shot, subject waist-up, surroundings visible",
-    close: "close-up, face fills the frame, emotion readable",
-    detail: "extreme close-up on one telling detail — hands, eyes, or a single object",
+    wide: "Wide establishing shot of the whole scene, subject small against a vast environment",
+    medium: "Medium shot of the main figures, waist-up, surroundings visible behind them",
+    close: "Tight close-up of the central figure's face, emotion readable, background thrown out of focus",
+    detail: "Extreme close-up of one telling detail in the scene — a hand, an object, a texture — the figures out of frame",
 };
 
 export type Beat = {
@@ -172,10 +180,11 @@ export function planShots<T extends Beat>(
                 // Ids must stay unique — the UI keys scene thumbnails on them.
                 ...(beat.id ? { id: `${beat.id}-${k}` } : {}),
                 narrationText,
-                // Every shot of a beat depicts the same moment, so the prompt is
-                // re-framed rather than replaced. Left unchanged, the generator
-                // returns the same picture two or three times in a row.
-                visualPrompt: count === 1 ? basePrompt : `${basePrompt}, ${SHOT_TYPE_PROMPTS[shotType]}`,
+                // Framing leads. Every shot of a beat depicts the same moment,
+                // so the prompt is re-framed rather than replaced — but the
+                // re-framing has to come first to survive the scene
+                // description that follows it.
+                visualPrompt: count === 1 ? basePrompt : `${SHOT_TYPE_PROMPTS[shotType]}. ${basePrompt}`,
                 shotType,
                 startMs,
                 endMs,

@@ -241,7 +241,13 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                     const url = await generateImage({
                         prompt,
                         style: artStyle,
-                        seed,
+                        // Per shot, not per reel. One seed for the whole reel
+                        // was meant to hold the look together, but a fixed seed
+                        // with a near-identical prompt reproduces the same
+                        // composition — which is exactly what splitting a beat
+                        // into shots produces. Style consistency comes from the
+                        // art-style prompt; the seed only pinned the framing.
+                        seed: seed + i,
                         usePremium,
                     });
                     // Copy onto local disk so the reel does not depend on a

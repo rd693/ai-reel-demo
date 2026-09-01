@@ -111,8 +111,13 @@ export function getTargets(durationInSeconds: number) {
     if (durationInSeconds <= 60) {
         return {
             targetWords, minWords, maxWords,
-            sceneCount: Math.max(8, Math.ceil(durationInSeconds / 6)),
-            sceneDuration: 6,
+            // Fewer, longer beats than before. These are narration beats now,
+            // not shots: the planner subdivides each one into 2-4 shots against
+            // the real audio. Ten beats in 60s forced ten separate events and
+            // read as a list; seven gives each one room to be dwelt on, and
+            // still yields ~21 shots.
+            sceneCount: Math.max(6, Math.ceil(durationInSeconds / 9)),
+            sceneDuration: 9,
             acts: 3,
             format: "9:16 portrait",
         };
@@ -541,7 +546,14 @@ SCENES: ${sceneCount} exactly
 LANGUAGE: ${effectiveLanguage}
 ${effectiveLanguage === 'hindi' ? `CRITICAL RULE: You MUST write the entire continuous script, scenes headlines, title, and narrationText strictly in pure DEVANAGARI HINDI script characters only. Do NOT use Roman letters (no English alphabets expressing Hindi words like Hinglish).` : ''}
 
-STEP 1 — Write a high-stakes, cinematic, and emotionally intense storyline about ${resolvedSubject}. Focus on deep human struggle, betrayal, legendary triumphs, or historical mystery.
+STORY DISCIPLINE — this is what decides whether anyone watches to the end:
+- ONE turning point, not a chronicle. If ${resolvedSubject} is a large epic containing many episodes, pick the SINGLE most charged episode inside it and tell only that one. Covering the whole legend end to end produces a list of events, which is the most common way this fails.
+- Name one figure whose CHOICE drives the story. Not "the gods and the demons" — one being who decides something and pays for it.
+- Never chain events. If two consecutive sentences could be joined by "and then" (और फिर / तब / उसके बाद), you have written a summary, not a story. Rewrite it.
+- Spend the MIDDLE of the script on the turn itself — the decision, the reversal, the cost — not on arriving at it.
+- The final line must land a consequence, not announce one more event.
+
+STEP 1 — Write a high-stakes, cinematic, emotionally intense storyline about ${resolvedSubject}, obeying STORY DISCIPLINE above. Focus on deep human struggle, betrayal, legendary triumph, or mystery.
 STEP 2 — Structure the script into exactly ${sceneCount} scenes. Each scene's narrationText must flow smoothly like a movie soundtrack voiceover.
 STEP 3 — For each scene's visualPrompt: answer Q1-Q5 silently, then write English-only high-fidelity prompt matching the dramatic visual beat.
 STEP 4 — Check the length of the "script" field. Aim for around ${targetWords} words, and make sure it ends on a complete, conclusive sentence.
@@ -564,6 +576,7 @@ JSON output:
 
 FINAL REMINDER:
 - Exactly ${sceneCount} scenes.
+- One turning point, one deciding figure, no "and then" chains.
 - Narration must sound like a cinematic documentary, not a biography.
 - All visual prompts in English, narration in ${effectiveLanguage} ${effectiveLanguage === 'hindi' ? '(MUST be pure Devanagari Hindi characters, no Roman script/English letters)' : ''}.
 `;

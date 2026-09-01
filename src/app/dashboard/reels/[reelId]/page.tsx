@@ -270,7 +270,9 @@ export default function ReelDetailPage() {
                 body: JSON.stringify({
                     prompt: prompt,
                     artStyle: reel.artStyle || series.artStyle || 'cinematic_3d',
-                    seed: (reel as any).seed,
+                    // Same derivation as the pipeline, so regenerating one
+                    // shot does not jump to a different composition.
+                    seed: ((reel as any).seed ?? 0) + index,
                     usePremium: reel.usePremiumImageStack || series.usePremiumImageStack ? true : false
                 }),
             });

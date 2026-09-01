@@ -1,13 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Sparkles, Wand2, Check, Globe, Type, Languages } from "lucide-react";
+import { ArrowLeft, Sparkles, Wand2, Check, Globe, Type, Languages, Music } from "lucide-react";
 import Link from "next/link";
 import { v4 as uuidv4 } from "uuid";
 import { seriesStore } from "../../../../lib/series/seriesStore";
 import { NicheType, ArtStyle, Series } from "../../../../types/series";
-import { getDefaultMusic } from "../../../../lib/music";
 import { VoicePicker } from "../../../../components/VoicePicker";
 
 const NICHES: { value: NicheType; label: string; description: string }[] = [
@@ -63,8 +62,23 @@ export default function NewSeriesPage() {
         captionStyle: "word",
         captionColor: "#FFD700",
         seriesContext: "",
-        usePremiumImageStack: false
+        usePremiumImageStack: false,
+        musicEnabled: false,
+        musicTrackId: "",
     });
+
+    // Music was settable only after the series existed, buried in the settings
+    // modal, so every new series generated its first reels in silence and the
+    // owner had no reason to suspect a setting they were never shown.
+    const [tracks, setTracks] = useState<{ id: string; name: string; url: string }[]>([]);
+    useEffect(() => {
+        (async () => {
+            try {
+                const res = await fetch("/api/music");
+                setTracks((await res.json()).tracks ?? []);
+            } catch { /* the step degrades to "no tracks yet" */ }
+        })();
+    }, []);
 
     const [previewContent, setPreviewContent] = useState<any>(null);
 
@@ -88,9 +102,12 @@ export default function NewSeriesPage() {
             // Music is off unless you deliberately add a licensed track. It used
             // to default on, with a bundled track, so every series published
             // music the channel owner had never chosen or cleared.
+            // Off unless a track was deliberately chosen. It used to default
+            // on, with a bundled track, so every series published music the
+            // channel owner had never chosen or cleared.
             musicSettings: {
-                enabled: false,
-                trackId: getDefaultMusic()?.id ?? "",
+                enabled: formData.musicEnabled && !!formData.musicTrackId,
+                trackId: formData.musicTrackId,
                 volume: 0.5
             },
             captionStyle: {
@@ -387,6 +404,46 @@ export default function NewSeriesPage() {
                                     </button>
                                 ))}
                             </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">Background Music</label>
+                            {tracks.length === 0 ? (
+                                <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                                    No tracks yet. Generate one from the series settings after launch —
+                                    only music you own should go anywhere near an upload.
+                                </p>
+                            ) : (
+                                <div className="space-y-2">
+                                    <button
+                                        onClick={() => setFormData({ ...formData, musicEnabled: false, musicTrackId: "" })}
+                                        className={`w-full text-left p-4 rounded-xl border transition-all ${
+                                            !formData.musicEnabled
+                                                ? "border-indigo-600 bg-indigo-50 ring-2 ring-indigo-100"
+                                                : "border-slate-200 hover:border-slate-300"
+                                        }`}
+                                    >
+                                        <p className="font-bold text-slate-900">No music</p>
+                                        <p className="text-xs text-slate-500">Voiceover only</p>
+                                    </button>
+                                    {tracks.map(t => (
+                                        <button
+                                            key={t.id}
+                                            onClick={() => setFormData({ ...formData, musicEnabled: true, musicTrackId: t.id })}
+                                            className={`w-full text-left p-4 rounded-xl border transition-all ${
+                                                formData.musicEnabled && formData.musicTrackId === t.id
+                                                    ? "border-indigo-600 bg-indigo-50 ring-2 ring-indigo-100"
+                                                    : "border-slate-200 hover:border-slate-300"
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <Music className="text-indigo-500" size={20} />
+                                                <p className="font-bold text-slate-900 capitalize">{t.name}</p>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         <div>
