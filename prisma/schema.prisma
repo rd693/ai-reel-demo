@@ -136,6 +136,13 @@ model RenderJob {
   status   String @default("queued") // queued | processing | completed | failed
   progress Int    @default(0) // 0-100
 
+  // Liveness, not an audit trail. A render writes a progress percent every few
+  // seconds, so a "processing" row that has gone quiet belongs to a process
+  // that died — which is the only way to tell the two apart, since nothing
+  // resumes a render. Null until the render starts: a job still waiting its
+  // turn is judged by createdAt instead.
+  heartbeatAt DateTime?
+
   outputPath String? // path under public/, e.g. /renders/<reelId>/<id>.mp4
   error      String?
 

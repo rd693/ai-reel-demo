@@ -55,6 +55,16 @@ export function invalidateBundle() {
 }
 
 /**
+ * Where root-relative media is fetched from during a render.
+ *
+ * Exported because a render is only as good as this host: nothing local is
+ * read off disk, so a caller that can check it first should.
+ */
+export function assetBaseUrl(): string {
+    return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+}
+
+/**
  * Rewrites root-relative paths to absolute URLs.
  *
  * The headless renderer loads the composition from the bundle's own origin, so
@@ -82,7 +92,7 @@ export async function renderReelToMp4({
     outputPath,
     onProgress,
 }: RenderReelOptions): Promise<string> {
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    const baseUrl = assetBaseUrl();
     const absoluteReelData = { ...makeAbsolute(reelData, baseUrl), baseHost: baseUrl };
 
     const durationMs =

@@ -66,8 +66,12 @@ When the reel came from a planned topic, that topic's title and angle go to
 the writer as the promise the narration has to pay off, and the planned title
 wins over the one the script model invents.
 
-Rendering is a separate step (`POST /api/render`). Jobs are rows, so progress
-and output survive a restart, and the Remotion bundle is cached across renders.
+Rendering is a stage of its own, started either from the reel page
+(`POST /api/render`) or by the worker, which renders any reel whose shots are
+all present and has no MP4 yet. Jobs are rows, so progress and output survive a
+restart, and the Remotion bundle is cached across renders. Only one render runs
+at a time per process — two headless Chromiums on one laptop finish later than
+the same two in sequence.
 
 ## Image quality
 
@@ -98,6 +102,12 @@ It checks every `WORKER_INTERVAL_SECONDS` (default 300) and generates for any
 active series whose newest reel is older than its interval. One reel per series
 at a time. `Ctrl-C` finishes the reel in progress before exiting.
 
+Each pass then renders what is ready, so an overnight run leaves finished MP4s
+under `public/renders` rather than scenes waiting for somebody to click Export.
+Keep `npm run dev` running alongside the worker: the renderer fetches every shot
+over HTTP from `NEXT_PUBLIC_SITE_URL`, and a render fails immediately, with that
+reason on the job row, if nothing is serving them.
+
 To drive it from an external scheduler instead, `POST /api/cron/tick` does one
 pass. `GET /api/cron/tick` is a dry run: it reports what would happen without
 doing it.
@@ -108,6 +118,7 @@ doing it.
 | --- | --- |
 | `npm run dev` | Next app on :3000 |
 | `npm run worker` | Scheduler loop |
+| `npm run check:render` | Render three reels end to end, no API keys needed |
 | `npm run db:migrate` | Create a migration after editing the schema |
 | `npm run db:studio` | Browse the database |
 | `npm run studio` | Remotion Studio, for editing the composition |
