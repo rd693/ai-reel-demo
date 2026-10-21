@@ -1,6 +1,8 @@
 import { prisma } from "../db/client";
 import { reelRepo } from "../db/reelRepo";
 import { generateReel } from "../pipeline/generateReel";
+import { nextTopicFor } from "../pipeline/topicQueue";
+import { topicRepo } from "../db/topicRepo";
 import { isDue, IN_FLIGHT_STATUSES, type DueVerdict } from "./schedule";
 
 export type SeriesOutcome = {
@@ -9,6 +11,8 @@ export type SeriesOutcome = {
     action: "generated" | "resumed" | "skipped";
     reelId?: string;
     reason: string;
+    /** The planned topic this reel was made from, when there was one. */
+    topic?: string;
 };
 
 export type TickResult = {
@@ -65,18 +69,54 @@ export async function runSchedulerTick(now: Date = new Date()): Promise<TickResu
         }
 
         try {
+            // What to make. Without a queue every scheduled reel was generated
+            // from series.niche — the same line every run — so the writer
+            // re-picked a subject with no memory and converged on the obvious
+            // ones. A planning outage falls back to that old behaviour rather
+            // than skipping the slot.
+            const topic = await nextTopicFor(series.id);
+            if (!topic) {
+                console.warn(
+                    `[scheduler] ${series.name}: no planned topic available; falling back to the niche`,
+                );
+            }
+
             const reel = await reelRepo.create({
                 seriesId: series.id,
-                businessName: series.name,
+                businessName: topic?.title ?? series.name,
                 artStyle: series.artStyle as never, // free-text column, narrowed union in the domain type
                 language: series.language,
                 usePremiumImageStack: series.usePremiumImageStack,
                 generationStatus: "pending",
             });
 
-            console.log(`[scheduler] ${series.name}: generating (${verdict.reason})`);
-            await generateReel(reel.id!, { niche: series.niche, subject: series.niche });
+            // Claimed before generating, not after: two passes must never be
+            // able to make the same video. Released below if the reel never
+            // reached a script, so a provider outage does not consume a topic.
+            if (topic) await topicRepo.claim(topic.id, reel.id!);
+
+            console.log(
+                `[scheduler] ${series.name}: generating (${verdict.reason})` +
+                    (topic ? ` — "${topic.title}"` : ""),
+            );
+            await generateReel(reel.id!, {
+                niche: series.niche,
+                subject: topic?.subject ?? series.niche,
+                topicTitle: topic?.title,
+                topicAngle: topic?.angle,
+            });
             started++;
+
+            if (topic) {
+                const after = await prisma.reel.findUnique({
+                    where: { id: reel.id! },
+                    select: { script: true },
+                });
+                if (!after?.script?.trim()) {
+                    console.warn(`[scheduler] ${series.name}: no script produced; returning topic to the queue`);
+                    await topicRepo.release(topic.id);
+                }
+            }
 
             outcomes.push({
                 seriesId: series.id,
@@ -84,6 +124,7 @@ export async function runSchedulerTick(now: Date = new Date()): Promise<TickResu
                 action: "generated",
                 reelId: reel.id,
                 reason: verdict.reason,
+                topic: topic?.title,
             });
         } catch (error) {
             // generateReel records its own failures on the reel row; this only

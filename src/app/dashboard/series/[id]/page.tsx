@@ -7,6 +7,7 @@ import Link from "next/link";
 import { seriesStore } from "@/lib/series/seriesStore";
 import { Series, FacelessReel, ArtStyle } from "@/types/series";
 import { VoicePicker } from "@/components/VoicePicker";
+import { TopicQueue } from "@/components/topics/TopicQueue";
 import { REEL_FORMATS, FORMAT_LABELS, FORMAT_DESCRIPTIONS, type ReelFormat } from "@/lib/pipeline/format";
 
 
@@ -392,6 +393,9 @@ export default function SeriesDetailPage() {
                     </button>
                 </div>
             </div>
+
+            {/* What gets made next, before anything is spent making it. */}
+            <TopicQueue seriesId={seriesId} />
 
             {/* Reels List (Text-focused cards as requested) */}
             <div className="space-y-6">

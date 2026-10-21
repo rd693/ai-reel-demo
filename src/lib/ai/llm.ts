@@ -5,6 +5,8 @@
 //          word count enforcement, prompt sanitization
 // ─────────────────────────────────────────────────────────────
 
+import { styleClause } from "../visuals/artStyles";
+
 export interface GeneratedScript {
     title: string;
     script: string;
@@ -80,24 +82,6 @@ function resolveLanguage(subject: string, requestedLanguage: string): string {
 // ─────────────────────────────────────────────────────────────
 // ART STYLES
 // ─────────────────────────────────────────────────────────────
-const ART_STYLE_PROMPTS: Record<string, string> = {
-    watercolor_illustration: "watercolor illustration, soft painterly washes, muted palette, loose brushstrokes, single image, no text",
-    comic: "bold comic book art, thick black outlines, flat vivid colors, single frame, no text",
-    creepy_comic: "dark horror comic art, heavy ink shadows, distorted expressions, unsettling, single image, no text",
-    modern_cartoon: "modern cartoon style, clean vector lines, vibrant saturated colors, expressive, single character, no text",
-    disney: "Disney animation style, warm lighting, expressive eyes, cinematic composition, single character, no text",
-    mythology: "Indian mythology painting, ornate temple art style, gold divine light, rich jewel tones, single scene, no text",
-    pixel_art: "pixel art, 16-bit retro game style, limited palette, crisp pixels, individual character, no text",
-    ghibli: "Studio Ghibli style, soft watercolor backgrounds, lush nature detail, warm gentle light, single frame, no text",
-    anime: "anime illustration, detailed character art, dynamic pose, cinematic lighting, individual, no text",
-    painting: "classical oil painting, rich textures, dramatic chiaroscuro, old master style, single scene, no text",
-    dark_fantasy: "dark fantasy digital art, moody shadows, epic scale, dramatic atmosphere, single image, no text",
-    lego: "LEGO minifigure style, plastic toy aesthetic, bright primary colors, blocky, single figure, no text",
-    polaroid: "polaroid photo style, slightly faded, warm vintage grain, candid documentary feel, single shot, no text",
-    realism: "photorealistic, 8K detail, cinematic photography, sharp focus, dramatic lighting, single scene, no text",
-    fantastic: "fantastical illustration, magical realism, surreal dreamlike colors, epic, single frame, no text",
-    cinematic_3d: "cinematic 3D render, volumetric lighting, ultra detailed, film quality, single individual, no text",
-};
 
 // ─────────────────────────────────────────────────────────────
 // DURATION TARGETS
@@ -235,7 +219,7 @@ export async function generateScriptWithAI(
 
     const { targetWords, minWords, maxWords, sceneCount, sceneDuration, format } = getTargets(durationInSeconds);
     const isCustom = !!customScript;
-    const stylePrompt = ART_STYLE_PROMPTS[artStyle] || ART_STYLE_PROMPTS.watercolor_illustration;
+    const stylePrompt = styleClause(artStyle);
     const resolvedSubject = subject || niche;
 
     // Auto-detect language for Indian subjects
@@ -684,16 +668,22 @@ FINAL REMINDER:
         }
     }
 
-    // 2. Groq 70b (fastest free option)
+    // 2. Groq (fastest free option)
+    //
+    // Both Llama models named here before — llama-3.3-70b-versatile and
+    // llama-3.1-8b-instant — have been decommissioned and answered 404, so
+    // with usePremium off every script fell through this rung and Gemini's
+    // (also 404) into the static fallback. List a key's live models with
+    // GET https://api.groq.com/openai/v1/models.
     const groqKey = process.env.GROQ_API_KEY || process.env.GROK_API_KEY;
     if (groqKey?.startsWith('gsk_')) {
         try {
-            console.log(`[LLM] Trying Groq 70b → ${resolvedSubject}`);
+            console.log(`[LLM] Trying Groq gpt-oss-120b → ${resolvedSubject}`);
             const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                 method: "POST",
                 headers: { "Authorization": `Bearer ${groqKey}`, "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    model: "llama-3.3-70b-versatile",
+                    model: "openai/gpt-oss-120b",
                     messages: [
                         { role: "system", content: systemPrompt },
                         { role: "user", content: userPrompt }
@@ -705,17 +695,17 @@ FINAL REMINDER:
             if (res.ok) {
                 const data = await res.json();
                 const result = parseJSON(data.choices[0].message.content);
-                console.log(`[LLM] ✅ Groq 70b success — ${result.scenes.length} scenes`);
+                console.log(`[LLM] ✅ Groq gpt-oss-120b success — ${result.scenes.length} scenes`);
                 return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride, !isCustom);
             }
-            console.warn(`[LLM] Groq 70b failed (${res.status}), trying 8b...`);
+            console.warn(`[LLM] Groq gpt-oss-120b failed (${res.status}), trying 20b...`);
 
             // Groq 8b fallback (higher rate limits)
             const res8b = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                 method: "POST",
                 headers: { "Authorization": `Bearer ${groqKey}`, "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    model: "llama-3.1-8b-instant",
+                    model: "openai/gpt-oss-20b",
                     messages: [
                         { role: "system", content: systemPrompt },
                         { role: "user", content: userPrompt }
@@ -727,22 +717,27 @@ FINAL REMINDER:
             if (res8b.ok) {
                 const data = await res8b.json();
                 const result = parseJSON(data.choices[0].message.content);
-                console.log(`[LLM] ✅ Groq 8b success — ${result.scenes.length} scenes`);
+                console.log(`[LLM] ✅ Groq gpt-oss-20b success — ${result.scenes.length} scenes`);
                 return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride, !isCustom);
             }
-            console.warn(`[LLM] Groq 8b also failed`);
+            console.warn(`[LLM] Groq gpt-oss-20b also failed`);
         } catch (e: any) {
             console.warn(`[LLM] Groq error: ${e.message}`);
         }
     }
 
     // 3. Gemini (free backup)
+    //
+    // The model is pinned, so a retirement shows up as a 404 and this rung
+    // goes quiet — gemini-2.0-flash had already been retired and every call
+    // here was failing. List what a key can actually reach with
+    // GET https://generativelanguage.googleapis.com/v1beta/models?key=...
     const geminiKey = process.env.GEMINI_API_KEY;
     if (geminiKey) {
         try {
             console.log(`[LLM] Trying Gemini → ${resolvedSubject}`);
             const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiKey}`,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },

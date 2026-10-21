@@ -1,98 +1,4 @@
-// export const generateImage = async (prompt: string, style: string): Promise<string> => {
-//     const enhancedPrompt = `${prompt}, ${style}, cinematic, photorealistic, no text, no watermark`;
-
-//     // 1. ReelShorts API (Strict Priority — Fastest + High Quality)
-//     for (let attempt = 1; attempt <= 2; attempt++) {
-//         try {
-//             console.log(`[ImageGen] ReelShorts attempt ${attempt}...`);
-//             const res = await fetch("https://reelshorts.in/api/image/generate", {
-//                 method: "POST",
-//                 headers: { "Content-Type": "application/json" },
-//                 body: JSON.stringify({
-//                     prompt: enhancedPrompt,
-//                     settings: { width: 576, height: 1024, steps: 25, guidance: 7 }
-//                 }),
-//                 signal: AbortSignal.timeout(30000) // Increased to 30s for stability
-//             });
-
-//             if (res.ok) {
-//                 const data = await res.json();
-//                 const results = Array.isArray(data) ? data : (data.data || [data]);
-//                 const url = results[0]?.url || results[0]?.imageUrl || data.url;
-
-//                 if (url) {
-//                     console.log(`[ImageGen] ✅ ReelShorts success: ${url}`);
-//                     return url;
-//                 }
-//             }
-//         } catch (e) {
-//             console.warn(`[ImageGen] ReelShorts attempt ${attempt} failed:`, e);
-//             if (attempt === 2) break;
-//             await new Promise(r => setTimeout(r, 1000)); // Short backoff
-//         }
-//     }
-
-//     // 2. Together.ai FLUX schnell (secondary — ~3-5s, free credits)
-//     const togetherKey = process.env.TOGETHER_API_KEY;
-//     if (togetherKey) {
-//         try {
-//             const res = await fetch("https://api.together.xyz/v1/images/generations", {
-//                 method: "POST",
-//                 headers: {
-//                     "Authorization": `Bearer ${togetherKey}`,
-//                     "Content-Type": "application/json"
-//                 },
-//                 body: JSON.stringify({
-//                     model: "black-forest-labs/FLUX.1-schnell-Free",
-//                     prompt: enhancedPrompt,
-//                     width: 576,
-//                     height: 1024,
-//                     steps: 4,
-//                     n: 1
-//                 }),
-//                 signal: AbortSignal.timeout(20000)
-//             });
-//             if (res.ok) {
-//                 const data = await res.json();
-//                 const url = data.data?.[0]?.url;
-//                 if (url) {
-//                     console.log(`[ImageGen] ✅ Together.ai success`);
-//                     return url;
-//                 }
-//             }
-//         } catch (e) {
-//             console.warn("[ImageGen] Together.ai failed:", e);
-//         }
-//     }
-
-//     // 3. Pollinations turbo (tertiary — free, no key, ~10-15s with turbo)
-//     try {
-//         const seed = Math.floor(Math.random() * 1000000);
-//         const safePrompt = enhancedPrompt
-//             .substring(0, 400)
-//             .replace(/[\[\]{}|\\^`<>"']/g, '');
-
-//         const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(safePrompt)}?width=576&height=1024&model=turbo&nologo=true&enhance=false&seed=${seed}`;
-
-//         // Fetch the actual image with a timeout
-//         const res = await fetch(url, {
-//             signal: AbortSignal.timeout(25000)
-//         });
-
-//         if (res.ok) {
-//             console.log(`[ImageGen] ✅ Pollinations turbo success`);
-//             return url;
-//         }
-//     } catch (e) {
-//         console.warn("[ImageGen] Pollinations failed:", e);
-//     }
-
-//     // 4. Last resort placeholder
-//     console.warn("[ImageGen] All providers failed, using placeholder");
-//     const seed = Math.floor(Math.random() * 1000);
-//     return `https://picsum.photos/seed/${seed}/576/1024`;
-// };
-
+import { hasStyleClause, styleClause } from "./artStyles";
 
 interface GenerateImageOptions {
     prompt: string;
@@ -107,67 +13,123 @@ interface ImageSize {
     height: number;
 }
 
+/**
+ * What to ask for, before each provider's own ceiling is applied.
+ *
+ * The reel size is the render size. It used to be 768x1344, which the
+ * composition then scaled up to 1080x1920 and pushed into further on top of
+ * that (see kenBurns) — so every shot was a soft, upscaled image before the
+ * camera move even started.
+ */
 const IMAGE_SIZES: Record<NonNullable<GenerateImageOptions["aspect"]>, ImageSize> = {
-    reel: { width: 768, height: 1344 },
+    reel: { width: 1080, height: 1920 },
     square: { width: 1024, height: 1024 },
-    landscape: { width: 1344, height: 768 },
+    landscape: { width: 1920, height: 1080 },
 };
 
-const STYLE_MODIFIERS: Record<string, string[]> = {
-    cinematic_3d: ["unreal engine 5.4 render", "octane render 2024", "cinematic global illumination", "high dynamic range", "ray tracing", "3d masterpiece", "hyper-detailed textures", "volumetric atmosphere"],
-    anime: ["modern high-end anime style", "makoto shinkai and coix style", "vibrant color grading", "intricate line art", "soft cinematic cel shading", "4k japanese animation", "scenic background detail"],
-    pixar: ["disney pixar 2024 style", "subsurface scattering", "soft rounded 3d forms", "vivid cinematic colors", "playful character design", "rendered in renderman", "masterpiece animation"],
-    oil_painting: ["masterpiece oil painting", "heavy impasto technique", "thick textured brushstrokes", "classical museum quality", "rich oil color palette", "dramatic chiaroscuro", "fine art canvas"],
-    watercolor: ["ethereal fluid watercolor", "professional wet-on-wet technique", "delicate paper texture", "artistic ink bleeds", "vibrant washes", "hand-painted masterpiece"],
-    vintage_photography: ["authentic 1970s film stock", "kodachrome 64 aesthetic", "heavy film grain", "vintage lens flare", "nostalgic color science", "slight chromatic aberration", "analog photography"],
-    digital_art: ["high-end digital illustration", "artstation trending", "concept art masterpiece", "smooth color transitions", "sharp clean edges", "detailed digital painting", "wacom cintiq style"],
-    cyberpunk: ["neo-tokyo cyberpunk aesthetic", "vibrant neon signage", "dystopian futuristic city", "rain-slicked streets", "bioluminescent accents", "cinematic teal and orange lighting"],
-    realistic: ["hyper-realistic 8k photography", "shot on Sony A7R V", "100mm macro lens", "extremely detailed skin pores", "natural sunlight", "photorealistic masterpiece", "highly detailed textures"],
-    noir: ["classic film noir aesthetic", "high contrast monochrome", "dramatic venetian blind shadows", "smoke and mirrors", "moody detective aesthetic", "4k black and white film grain"]
-};
+/**
+ * Longest side each generator will actually honour.
+ *
+ * FLUX.1 [pro] rejects a side over 1440, so a reel asks fal for 800x1440 —
+ * still 1.4x the pixels of the old request. The free generators stay where
+ * they were; raising them only produces slower, not better, images.
+ */
+const MAX_SIDE = {
+    fal: 1440,
+    free: 1344,
+} as const;
 
-function buildEnhancedPrompt(prompt: string, style: string = "cinematic_3d"): string {
-    const modifiers = STYLE_MODIFIERS[style] || [style];
+/** Scales a request to fit a provider's ceiling, on a multiple of 32. */
+function fit(size: ImageSize, maxSide: number): ImageSize {
+    const longest = Math.max(size.width, size.height);
+    if (longest <= maxSide) return size;
 
-    return [
-        prompt,
-        ...modifiers,
-        "one single cinematic scene", // Strengthened
-        "single focus point",         // New
-        "no split screen",            // New
-        "no collage",                 // New
-        "high dynamic range",
-        "8k resolution",
-        "professional color grading",
-        "masterpiece quality",
-        "intricate details",
-        "no text",
-        "no watermark",
-    ]
-        .filter(Boolean)
-        .join(", ");
+    const scale = maxSide / longest;
+    // Diffusion models work in multiples of 32 and pad anything else, and a
+    // padded request comes back letterboxed.
+    const snap = (n: number) => Math.max(256, Math.round((n * scale) / 32) * 32);
+    return { width: snap(size.width), height: snap(size.height) };
 }
 
+/**
+ * Removes clauses that negate.
+ *
+ * This is the fix for the single worst thing the old prompt builder did. Every
+ * generator in the ladder is a FLUX-family model conditioned by T5, and none
+ * of them have a negative channel — fal's flux-pro v1.1 has no
+ * `negative_prompt` field at all. The old code built a negative prompt anyway
+ * and then *concatenated it onto the positive one*: ". Negative: collage,
+ * split screen, multiple panels, grid of images, extra limbs, extra hands,
+ * extra fingers, montage, diptych, triptych, blurry, bad anatomy, text, logo,
+ * watermark".
+ *
+ * To the model that is not a prohibition, it is a request. Every image was
+ * asking for collages, extra limbs and watermarks — the exact artefacts the
+ * list was written to prevent. Together got the same list as "[Strictly
+ * avoid: ...]" and Pollinations as "Strictly no collage".
+ *
+ * So: strip negations from whatever reaches here — the writer's prompts and
+ * the stored prompts of older reels both contain "no text" — and send a real
+ * negative prompt only to a provider that has a field for one.
+ */
+export function stripNegations(prompt: string): string {
+    return prompt
+        .split(",")
+        .filter((clause) => {
+            const c = clause.trim().toLowerCase();
+            return c.length > 0 && !/^(no|not|without|avoid|never|minus)\b/.test(c);
+        })
+        .join(", ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+/**
+ * The prompt a generator actually receives.
+ *
+ * Short on purpose. The old builder appended fifteen boosters — "8k
+ * resolution", "masterpiece quality", "professional color grading",
+ * "intricate details" — plus up to eight style keywords, so the scene being
+ * depicted was a fifth of the prompt and the rest was SD-era keyword soup
+ * that a T5-conditioned model does not reward. The subject leads, the style
+ * clause follows once, and nothing else is added.
+ */
+function buildPrompt(
+    prompt: string,
+    style: string | undefined,
+    aspect: NonNullable<GenerateImageOptions["aspect"]>,
+): string {
+    const subject = stripNegations(prompt || "");
+    const clause = stripNegations(styleClause(style));
+
+    const parts = [subject];
+    // The writer already appends the style clause to each visual prompt, so
+    // adding it again here was a second, conflicting style instruction.
+    if (!hasStyleClause(subject, clause)) parts.push(clause);
+    if (aspect === "reel") parts.push("vertical full-frame composition");
+
+    return parts.filter(Boolean).join(", ");
+}
+
+/**
+ * Sent only to generators that have a real negative channel.
+ *
+ * ReelShorts takes a `negative_prompt` field, so the list does what it says
+ * there. For the FLUX endpoints it is deliberately unused.
+ */
 function buildNegativePrompt(): string {
     return [
         "collage",
         "split screen",
         "multiple panels",
-        "multiple images",
         "grid of images",
         "extra limbs",
-        "extra hands",
         "extra fingers",
-        "human body parts merging with animal body parts",
-        "montage",
-        "diptych",
-        "triptych",
+        "deformed hands",
         "low quality",
         "blurry",
-        "distorted",
         "bad anatomy",
         "text",
-        "logo",
         "watermark",
     ].join(", ");
 }
@@ -201,15 +163,16 @@ export async function generateImage({
     console.log(`[ImageGen] Generating: "${prompt?.substring(0, 50)}..." | Style: ${style} | Aspect: ${aspect} | Seed: ${seed} | Premium: ${usePremium}`);
 
     const size = IMAGE_SIZES[aspect];
-
-    const enhancedPrompt = buildEnhancedPrompt(prompt, style);
+    const finalPrompt = buildPrompt(prompt, style, aspect);
     const negativePrompt = buildNegativePrompt();
+
+    console.log(`[ImageGen] prompt: "${finalPrompt.slice(0, 160)}"`);
 
     // 1. Fal.ai (Primary Premium)
     if (usePremium) {
         const falUrl = await generateWithFal({
-            prompt: enhancedPrompt,
-            negativePrompt, 
+            prompt: finalPrompt,
+            negativePrompt,
             size,
             seed: seed,
         });
@@ -220,7 +183,7 @@ export async function generateImage({
 
     // 2. ReelShorts
     const reelShortsUrl = await generateWithReelShorts({
-        prompt: enhancedPrompt,
+        prompt: finalPrompt,
         negativePrompt,
         size,
         seed: seed,
@@ -230,7 +193,7 @@ export async function generateImage({
 
     // 3. Together.ai
     const togetherUrl = await generateWithTogether({
-        prompt: enhancedPrompt,
+        prompt: finalPrompt,
         negativePrompt,
         size,
         seed: seed,
@@ -240,7 +203,7 @@ export async function generateImage({
 
     // 4. Pollinations
     const pollinationsUrl = await generateWithPollinations({
-        prompt: enhancedPrompt,
+        prompt: finalPrompt,
         negativePrompt,
         size,
         seed: seed,
@@ -267,6 +230,8 @@ async function generateWithReelShorts(args: {
     size: ImageSize;
     seed?: number;
 }): Promise<string | null> {
+    const size = fit(args.size, MAX_SIDE.free);
+
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const res = await fetch("https://reelshorts.in/api/image/generate", {
@@ -278,8 +243,8 @@ async function generateWithReelShorts(args: {
                     prompt: args.prompt,
                     negative_prompt: args.negativePrompt,
                     settings: {
-                        width: args.size.width,
-                        height: args.size.height,
+                        width: size.width,
+                        height: size.height,
                         steps: 20, // Lowered from 30 to reduce generation time and avoid 504
                         guidance: 7,
                         output_format: "jpg",
@@ -319,6 +284,8 @@ async function generateWithTogether(args: {
     const togetherKey = process.env.TOGETHER_API_KEY;
     if (!togetherKey) return null;
 
+    const size = fit(args.size, MAX_SIDE.free);
+
     try {
         const res = await fetch("https://api.together.xyz/v1/images/generations", {
             method: "POST",
@@ -328,10 +295,11 @@ async function generateWithTogether(args: {
             },
             body: JSON.stringify({
                 model: "black-forest-labs/FLUX.1-schnell-Free",
-                // For Together Flux, we append the negative constraints directly
-                prompt: `${args.prompt} [Strictly avoid: ${args.negativePrompt}]`,
-                width: args.size.width,
-                height: args.size.height,
+                // Schnell is FLUX too: a bracketed "strictly avoid" list is
+                // read as part of the description, not as a prohibition.
+                prompt: args.prompt,
+                width: size.width,
+                height: size.height,
                 steps: 4,
                 n: 1,
                 seed: args.seed,
@@ -362,13 +330,18 @@ async function generateWithPollinations(args: {
 }): Promise<string | null> {
     try {
         const seed = args.seed ?? Math.floor(Math.random() * 1000000);
-        const safePrompt = `${args.prompt}. Strictly no ${args.negativePrompt.split(',')[0]}`
+        const size = fit(args.size, MAX_SIDE.free);
+        const safePrompt = args.prompt
             .substring(0, 900)
             .replace(/[\[\]{}|\\^`<>"']/g, "");
 
+        // model=flux, not turbo. Turbo is the fastest and weakest tier
+        // Pollinations offers, and it is the last rung of the ladder — so the
+        // images a free run actually shipped came from the worst generator
+        // available.
         const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(
             safePrompt
-        )}?width=${args.size.width}&height=${args.size.height}&model=turbo&nologo=true&enhance=false&seed=${seed}`;
+        )}?width=${size.width}&height=${size.height}&model=flux&nologo=true&enhance=false&seed=${seed}`;
 
         const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
         if (res.ok) {
@@ -390,10 +363,17 @@ async function generateWithFal(args: {
     const falKey = process.env.FAL_KEY || process.env.FAL_API_KEY;
     if (!falKey) return null;
 
+    const size = fit(args.size, MAX_SIDE.fal);
+
+    // The safety checker stays on, but at its default tolerance it rejects
+    // ordinary historical subjects — a battlefield, a weapon, an execution —
+    // and a rejection arrives as a solid black PNG the pipeline then has to
+    // detect and throw away. Raising the tolerance cuts those false positives
+    // on a history channel. 1 is strictest, 6 the most permissive.
+    const safetyTolerance = process.env.FAL_SAFETY_TOLERANCE || "4";
+
     try {
-        console.log(`[ImageGen] Calling fal.ai Flux.1 [pro] v1.1...`);
-        // We append negative prompt to the main prompt for Flux models that don't have a separate field
-        const finalPrompt = `${args.prompt}. Negative: ${args.negativePrompt}`;
+        console.log(`[ImageGen] Calling fal.ai Flux.1 [pro] v1.1 at ${size.width}x${size.height}...`);
 
         const response = await fetch("https://fal.run/fal-ai/flux-pro/v1.1", {
             method: "POST",
@@ -402,19 +382,24 @@ async function generateWithFal(args: {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({
-                prompt: finalPrompt,
+                // No negative prompt: this endpoint has no field for one, and
+                // appending it to the positive prompt is how the old code
+                // asked every image for the artefacts it meant to forbid.
+                prompt: args.prompt,
                 image_size: {
-                    width: args.size.width,
-                    height: args.size.height
+                    width: size.width,
+                    height: size.height
                 },
-                num_inference_steps: 25,
-                guidance_scale: 3.5,
+                // num_inference_steps and guidance_scale were being sent here
+                // and silently ignored: v1.1 is a fixed pipeline and takes
+                // neither.
                 num_images: 1,
                 enable_safety_checker: true,
+                safety_tolerance: safetyTolerance,
                 output_format: "jpeg",
                 seed: args.seed,
             }),
-            signal: AbortSignal.timeout(60000)
+            signal: AbortSignal.timeout(90000)
         });
 
         if (!response.ok) {
@@ -426,13 +411,14 @@ async function generateWithFal(args: {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                    prompt: finalPrompt,
+                    prompt: args.prompt,
                     image_size: {
-                        width: args.size.width,
-                        height: args.size.height
-                    }
+                        width: size.width,
+                        height: size.height
+                    },
+                    seed: args.seed,
                 }),
-                signal: AbortSignal.timeout(60000)
+                signal: AbortSignal.timeout(90000)
             });
             if (backupResponse.ok) {
                 const backupData = await backupResponse.json();

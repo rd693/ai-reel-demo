@@ -67,6 +67,16 @@ export type GenerateOptions = {
     customScript?: string;
     artStyle?: string;
     visualStyleOverride?: string;
+    /**
+     * Title from the topic queue, when the reel came from a planned topic.
+     *
+     * It wins over the title the script model invents. The planned one was
+     * written against what is being searched for and what is performing in
+     * the niche; the script model's is a by-product of writing narration.
+     */
+    topicTitle?: string;
+    /** The turn the planner intended this telling to take. */
+    topicAngle?: string;
 };
 
 /**
@@ -128,6 +138,21 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
         if (!progress.hasScript) {
             console.log(`[pipeline ${reelId}] script`);
 
+            // A planned topic is a promise to the viewer: the title was written
+            // first and the narration has to pay it off, so both the title and
+            // the angle go to the writer as context rather than being applied
+            // to the finished script.
+            const brief =
+                [
+                    series.seriesContext,
+                    options.topicTitle
+                        ? `This reel is titled "${options.topicTitle}" and the narration must deliver exactly that promise.`
+                        : null,
+                    options.topicAngle ? `Angle to take: ${options.topicAngle}` : null,
+                ]
+                    .filter(Boolean)
+                    .join(" ") || undefined;
+
             const script = await generateScriptWithAI(
                 options.niche ?? series.niche,
                 language,
@@ -135,7 +160,7 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                 options.customScript,
                 artStyle,
                 options.subject ?? series.niche,
-                series.seriesContext ?? undefined,
+                brief,
                 series.visualStylePrompt ?? undefined,
                 options.visualStyleOverride ?? row.visualStyleOverride ?? undefined,
                 usePremium,
@@ -147,7 +172,7 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
             if (!finalScript) throw new Error("Script generation returned no text");
 
             await reelRepo.update(reelId, {
-                businessName: script.title || series.niche,
+                businessName: options.topicTitle || script.title || series.niche,
                 script: finalScript,
                 artStyle: artStyle as never,
                 seed: row.seed ?? Math.floor(Math.random() * 2147483647),

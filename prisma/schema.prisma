@@ -47,7 +47,8 @@ model Series {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  reels Reel[]
+  reels      Reel[]
+  topicIdeas TopicIdea[]
 
   @@index([status])
 }
@@ -153,4 +154,53 @@ model Asset {
   type     String @default("image") // image | video
 
   createdAt DateTime @default(now())
+}
+
+// A planned topic, waiting for its turn.
+//
+// Before this, every scheduled reel was generated from `Series.niche` — the
+// same one line, run after run, with no memory of the previous thirty reels.
+// The writer re-picked a subject each time and converged on the obvious ones,
+// which is how a channel ends up with four reels about the same battle.
+//
+// A topic is written once, in a batch, by a planner that can see what has
+// already been made and what is being searched for this week. The queue is a
+// table rather than a prompt instruction so that it can be reordered, edited
+// and — above all — deduplicated by the database instead of by asking a model
+// not to repeat itself.
+model TopicIdea {
+  id       String @id @default(uuid())
+  seriesId String
+  series   Series @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  // The title as it should appear on the video: written for the thumbnail and
+  // the first second, in the series language.
+  title String
+  // The entity an image model should depict. A title is not an image subject —
+  // see imageSubject() in src/lib/ai/llm.ts for why these are separate.
+  subject String
+  // The turn this telling takes, so two reels on one figure differ in substance.
+  angle String?
+  // Why this topic now. Empty for an evergreen pick.
+  rationale String?
+
+  // google-trends | youtube | evergreen — what put this in the queue.
+  trendSource String @default("evergreen")
+  // The planner's own 0-100 confidence that this earns a slot now.
+  score Int @default(50)
+
+  // Normalised title. The unique constraint below is what actually prevents
+  // duplicates; the prompt only reduces how often one is proposed.
+  dedupeKey String
+
+  status     String    @default("planned") // planned | used | skipped
+  sortOrder  Int       @default(0)
+  usedReelId String?
+  usedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([seriesId, dedupeKey])
+  @@index([seriesId, status, sortOrder])
 }
