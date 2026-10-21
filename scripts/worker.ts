@@ -1,8 +1,7 @@
-import dotenv from "dotenv";
-
-// Next loads .env.local automatically; a standalone script does not.
-dotenv.config({ path: ".env.local" });
-dotenv.config();
+// First, and not a plain dotenv.config() here: see the note in scripts/env.ts.
+// Loading it late left the worker on the default database whatever .env.local
+// said, because the client reads DATABASE_URL when it is imported.
+import "./env";
 
 import { runSchedulerTick } from "../src/lib/scheduler/tick";
 
@@ -28,6 +27,19 @@ async function tick() {
                 console.log(`[worker] ${o.action} "${o.name}" — ${o.reason} (reel ${o.reelId})`);
             }
         }
+
+        // Renders are reported separately: a tick can render reels without
+        // generating anything, which is what happens the morning after a run
+        // that was interrupted part-way through.
+        for (const r of result.renders) {
+            if (r.action === "rendered") {
+                console.log(`[worker] rendered "${r.title}" — ${r.outputPath}`);
+            } else if (r.action === "failed") {
+                console.error(`[worker] render failed for "${r.title}" — ${r.reason}`);
+            } else {
+                console.log(`[worker] no render for "${r.title}" — ${r.reason}`);
+            }
+        }
     } catch (error) {
         // A worker that dies on one bad tick is worse than one that logs and
         // tries again on the next interval.
@@ -37,7 +49,8 @@ async function tick() {
 
 async function loop() {
     console.log(
-        `[worker] started; checking every ${INTERVAL_SECONDS}s. Series with frequency "daily" or "weekly" generate automatically.`,
+        `[worker] started; checking every ${INTERVAL_SECONDS}s. Series with frequency "daily" or "weekly" ` +
+            `generate automatically, and any reel with all its shots gets rendered to MP4 — one render at a time.`,
     );
 
     while (!stopping) {

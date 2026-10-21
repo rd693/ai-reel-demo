@@ -34,6 +34,7 @@ export async function POST() {
 export async function GET() {
     const { prisma } = await import("@/lib/db/client");
     const { isDue, IN_FLIGHT_STATUSES } = await import("@/lib/scheduler/schedule");
+    const { reelsAwaitingRender } = await import("@/lib/scheduler/tick");
 
     const allSeries = await prisma.series.findMany({
         include: {
@@ -44,8 +45,13 @@ export async function GET() {
         },
     });
 
+    // Rendering is part of a tick now, so a dry run that only listed series
+    // would not say what the next tick is actually going to do.
+    const awaitingRender = await reelsAwaitingRender();
+
     return NextResponse.json({
         running: !!inFlight,
+        awaitingRender: awaitingRender.map((reel) => ({ reelId: reel.id, title: reel.title })),
         series: allSeries.map((s) => ({
             id: s.id,
             name: s.name,

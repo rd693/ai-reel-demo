@@ -34,16 +34,21 @@ export const renderJobRepo = {
     },
 
     async markProcessing(id: string) {
+        const now = new Date();
         await prisma.renderJob.update({
             where: { id },
-            data: { status: "processing", startedAt: new Date(), progress: 0 },
+            data: { status: "processing", startedAt: now, heartbeatAt: now, progress: 0 },
         });
     },
 
+    /** Doubles as the heartbeat — see RenderJob.heartbeatAt in the schema. */
     async setProgress(id: string, progress: number) {
         await prisma.renderJob.update({
             where: { id },
-            data: { progress: Math.max(0, Math.min(100, Math.round(progress))) },
+            data: {
+                progress: Math.max(0, Math.min(100, Math.round(progress))),
+                heartbeatAt: new Date(),
+            },
         });
     },
 
@@ -62,18 +67,38 @@ export const renderJobRepo = {
     },
 
     /**
-     * A job left "processing" cannot still be running after a restart — nothing
-     * resumes it — so it is failed on boot rather than polled forever.
+     * Fails jobs nothing is working on any more, and says which.
+     *
+     * This used to fail every queued or processing job on first use, on the
+     * grounds that nothing resumes a render. That was true of one process, but
+     * the app and `npm run worker` both render now, so a blanket sweep would
+     * declare the other process's live render dead and the scheduler would
+     * start a second render of the same reel. A row is only abandoned if it has
+     * gone quiet past `before` and is not one the sweeping process owns.
      */
-    async failStaleJobs(): Promise<number> {
-        const { count } = await prisma.renderJob.updateMany({
-            where: { status: { in: ["queued", "processing"] } },
+    async failAbandoned(before: Date, spareIds: string[] = []): Promise<RenderJobView[]> {
+        const abandoned = await prisma.renderJob.findMany({
+            where: {
+                status: { in: ["queued", "processing"] },
+                id: { notIn: spareIds },
+                // A job that never got off the queue has no heartbeat yet, so
+                // its age is all there is to go on.
+                OR: [
+                    { heartbeatAt: { lt: before } },
+                    { heartbeatAt: null, createdAt: { lt: before } },
+                ],
+            },
+        });
+        if (!abandoned.length) return [];
+
+        await prisma.renderJob.updateMany({
+            where: { id: { in: abandoned.map((job) => job.id) } },
             data: {
                 status: "failed",
-                error: "Interrupted by a server restart",
+                error: "Interrupted by a restart",
                 finishedAt: new Date(),
             },
         });
-        return count;
+        return abandoned.map(toRenderJob);
     },
 };

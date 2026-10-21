@@ -1,6 +1,7 @@
 import { prisma } from "../db/client";
 import { reelRepo } from "../db/reelRepo";
 import { generateReel } from "../pipeline/generateReel";
+import { failAbandonedRenders, startRenderJob } from "../remotion/runRenderJob";
 import { isDue, IN_FLIGHT_STATUSES, type DueVerdict } from "./schedule";
 
 export type SeriesOutcome = {
@@ -11,11 +12,55 @@ export type SeriesOutcome = {
     reason: string;
 };
 
+export type RenderOutcome = {
+    reelId: string;
+    title: string;
+    action: "rendered" | "failed" | "skipped";
+    reason: string;
+    outputPath?: string;
+};
+
 export type TickResult = {
     checkedAt: Date;
     outcomes: SeriesOutcome[];
     started: number;
+    renders: RenderOutcome[];
 };
+
+/**
+ * Stages that mean generateReel is still working on a reel.
+ *
+ * "rendering" is deliberately excluded: it is set by the render itself, so a
+ * reel left on it by an interrupted export is exactly what should be picked up
+ * again rather than skipped.
+ */
+const MID_GENERATION = IN_FLIGHT_STATUSES.filter((status) => status !== "rendering");
+
+/**
+ * Reels that have everything a render needs and no video to show for it.
+ *
+ * Read off the artifacts rather than generationStatus, the same way
+ * generateReel decides what is left to do: a reel whose render failed reads as
+ * "failed" and still deserves another attempt. A shot with no image is what
+ * disqualifies a reel — generateReel leaves a filtered shot unset on purpose so
+ * a retry regenerates only that one, and rendering now would bake the gap into
+ * the MP4 and record the reel as finished.
+ */
+export async function reelsAwaitingRender() {
+    return prisma.reel.findMany({
+        where: {
+            AND: [
+                { scenes: { some: {} } },
+                { scenes: { none: { backgroundPath: null } } },
+                { renderJobs: { none: { status: "completed" } } },
+                { generationStatus: { notIn: MID_GENERATION } },
+            ],
+        },
+        // Oldest first, so a backlog drains in the order it built up.
+        orderBy: { createdAt: "asc" },
+        select: { id: true, title: true },
+    });
+}
 
 /**
  * One pass of the scheduler.
@@ -27,8 +72,16 @@ export type TickResult = {
  * Generation is awaited rather than fired and forgotten. A tick therefore
  * takes as long as the reels it starts, which is what keeps a slow provider
  * from letting ticks pile up on top of each other.
+ *
+ * Rendering follows generation here because an MP4 that only appears when
+ * somebody opens the reel page and clicks Export is not a factory: an
+ * unattended overnight run used to leave finished scenes and no video file.
  */
 export async function runSchedulerTick(now: Date = new Date()): Promise<TickResult> {
+    // Before anything reads generationStatus: a reel stuck on "rendering" by a
+    // dead process counts as in-flight, and would hold up its whole series.
+    await failAbandonedRenders(now);
+
     const allSeries = await prisma.series.findMany({
         include: {
             reels: {
@@ -99,5 +152,57 @@ export async function runSchedulerTick(now: Date = new Date()): Promise<TickResu
         }
     }
 
-    return { checkedAt: now, outcomes, started };
+    // Rendering costs no API credits, so it runs for every ready reel rather
+    // than only for the series that were due — a paused or manual series still
+    // deserves the MP4 for a reel it has already paid to generate. Renders are
+    // serialised inside runRenderJob, so this loop never stacks two Chromiums.
+    const renders: RenderOutcome[] = [];
+    for (const reel of await reelsAwaitingRender()) {
+        try {
+            const result = await startRenderJob(reel.id);
+
+            if (result.outcome !== "started") {
+                renders.push({
+                    reelId: reel.id,
+                    title: reel.title,
+                    action: "skipped",
+                    reason:
+                        result.outcome === "in-flight"
+                            ? `a render is already in flight (job ${result.job.id})`
+                            : result.outcome,
+                });
+                continue;
+            }
+
+            console.log(`[scheduler] rendering "${reel.title}" (job ${result.job.id})`);
+
+            // Awaited for the same reason generation is, plus one of its own:
+            // the worker's shutdown handler waits on the tick, so Ctrl-C
+            // finishes the render instead of leaving a half-written MP4.
+            const job = await result.finished;
+            renders.push({
+                reelId: reel.id,
+                title: reel.title,
+                action: job.status === "completed" ? "rendered" : "failed",
+                reason:
+                    job.status === "completed"
+                        ? (job.outputPath ?? "rendered")
+                        : (job.error ?? "render failed"),
+                outputPath: job.outputPath,
+            });
+        } catch (error) {
+            // Failures inside the render are recorded on the job row; this only
+            // catches trouble starting one, which must not stop the loop.
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`[scheduler] could not render "${reel.title}" —`, message);
+            renders.push({
+                reelId: reel.id,
+                title: reel.title,
+                action: "failed",
+                reason: `failed to start: ${message}`,
+            });
+        }
+    }
+
+    return { checkedAt: now, outcomes, started, renders };
 }

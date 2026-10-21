@@ -113,6 +113,25 @@ export const reelRepo = {
         });
     },
 
+    /**
+     * Moves reels off "rendering" after the render that set it was abandoned.
+     *
+     * "rendering" counts as in-flight for the scheduler, so a reel stuck there
+     * stops its whole series from generating again. Only reels still on that
+     * status are touched — anything else has moved on since.
+     */
+    async clearInterruptedRendering(ids: string[]): Promise<number> {
+        if (!ids.length) return 0;
+        const { count } = await prisma.reel.updateMany({
+            where: { id: { in: ids }, generationStatus: "rendering" },
+            data: {
+                generationStatus: "failed",
+                generationError: "Rendering was interrupted by a restart. Export again.",
+            },
+        });
+        return count;
+    },
+
     async delete(id: string): Promise<boolean> {
         const existing = await prisma.reel.findUnique({ where: { id } });
         if (!existing) return false;
