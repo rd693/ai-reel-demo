@@ -51,7 +51,8 @@
     "db:studio": "prisma studio",
     "worker": "tsx scripts/worker.ts",
     "check": "tsx scripts/check-pipeline.ts",
-    "check:render": "tsx scripts/check-render.ts"
+    "check:render": "tsx scripts/check-render.ts",
+    "cards": "tsx scripts/render-cards.ts"
   },
   "sideEffects": [
     "*.css"

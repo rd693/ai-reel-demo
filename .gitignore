@@ -75,3 +75,6 @@ yarn-error.log*
 scratch_*
 
 /src/generated/prisma
+
+# Rendered sample cards (output of `npm run cards`).
+public/card-samples
