@@ -35,7 +35,16 @@ export type Deck = {
     /** Printed top-right, before the figure number. */
     figurePrefix: string;
     fonts: {
-        /** Heavy and condensed. Carries the one or two words that matter. */
+        /**
+         * Heavy and condensed. Carries the one or two words that matter.
+         *
+         * A full CSS stack, not one family, because a deck has to survive a
+         * language its display face has no glyphs for. Anton is Latin only, so
+         * a Hindi headline on the notebook deck silently fell through to
+         * whatever Devanagari face the machine happened to have — which looked
+         * fine on the Mac it was rendered on and would not be the same font
+         * anywhere else. Teko backs it up, and ships with the repo.
+         */
         display: string;
         /** Monospaced or near it. Every small label on the page. */
         label: string;
@@ -54,6 +63,15 @@ export type Deck = {
     };
     /** How the figure number is written. Devanagari counts in its own digits. */
     figureNumeral?: (n: number) => string;
+    /**
+     * How this deck's illustrations are drawn.
+     *
+     * "isolated on a plain background" is the load-bearing half: the page
+     * supplies the paper, the light and the composition, and an illustration
+     * that brings its own fights all three. It is also what lets the plate be
+     * multiplied onto the stock instead of cut out.
+     */
+    imageStyle: string;
     /** Devanagari has no case, so uppercasing has to be something a deck opts out of. */
     uppercase: boolean;
     colors: DeckColors;
@@ -88,7 +106,7 @@ export const fieldNotebook: Deck = {
         diagram: "PLATE",
     },
     figurePrefix: "FIG.",
-    fonts: { display: "Anton", label: "JetBrains Mono", displayScale: 1, displayLeading: 0.95, labelTracking: "0.22em" },
+    fonts: { display: '"Anton", "Teko", sans-serif', label: '"JetBrains Mono", "Mukta", monospace', displayScale: 1, displayLeading: 0.95, labelTracking: "0.22em" },
     uppercase: true,
     colors: {
         paper: "#d6cbae",
@@ -99,6 +117,9 @@ export const fieldNotebook: Deck = {
         darkInk: "#e9e3d4",
     },
     paper: { rules: true, holes: true, fold: true, border: false, grain: 0.5 },
+    imageStyle:
+        "antique scientific engraving, etched linework, halftone print, single isolated specimen, " +
+        "centred on a plain flat white background, no scenery, no shadow, no text",
 };
 
 /**
@@ -120,7 +141,7 @@ export const manuscript: Deck = {
         diagram: "रेखा",
     },
     figurePrefix: "पर्व",
-    fonts: { display: "Teko", label: "Mukta", displayScale: 1.22, displayLeading: 1.02, labelTracking: "0.05em" },
+    fonts: { display: '"Teko", "Anton", sans-serif', label: '"Mukta", "JetBrains Mono", monospace', displayScale: 1.22, displayLeading: 1.02, labelTracking: "0.05em" },
     uppercase: false,
     colors: {
         paper: "#e0cfa9",
@@ -135,6 +156,9 @@ export const manuscript: Deck = {
         String(n)
             .padStart(2, "0")
             .replace(/\d/g, (d) => "०१२३४५६७८९"[Number(d)]),
+    imageStyle:
+        "indian miniature painting, ink and gouache, flat gold and ochre palette, single isolated " +
+        "figure centred on a plain flat cream background, no scenery, no border, no text",
 };
 
 export const DECKS: Record<string, Deck> = {

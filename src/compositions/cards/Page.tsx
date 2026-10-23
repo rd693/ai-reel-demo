@@ -48,7 +48,11 @@ export const CardFonts: React.FC<{ baseHost?: string; deck: Deck }> = ({ baseHos
     const [handle] = useState(() => delayRender("Loading card fonts"));
 
     useEffect(() => {
-        const wanted = [`700 100px "${deck.fonts.display}"`, `700 24px "${deck.fonts.label}"`];
+        // document.fonts.load takes one family at a time, so every face in the
+        // stack is requested — including the fallback that carries the script
+        // the display face cannot set.
+        const families = `${deck.fonts.display} ${deck.fonts.label}`.match(/"[^"]+"/g) ?? [];
+        const wanted = families.flatMap((family) => [`700 100px ${family}`, `700 24px ${family}`]);
         Promise.all(wanted.map((font) => document.fonts.load(font).catch(() => undefined)))
             .then(() => document.fonts.ready)
             .catch(() => undefined)
@@ -157,7 +161,7 @@ export const PageHeader: React.FC<{
                 left: MARGIN,
                 right: MARGIN,
                 top: HEADER_Y,
-                fontFamily: `"${deck.fonts.label}", monospace`,
+                fontFamily: deck.fonts.label,
                 fontWeight: 700,
                 fontSize: 26,
                 letterSpacing: deck.fonts.labelTracking,

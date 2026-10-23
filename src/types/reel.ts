@@ -31,6 +31,15 @@ export type ReelScene = {
     /** Line spoken over this scene; drives both captions and scene length. */
     narrationText?: string;
 
+    /**
+     * How this shot is laid out when the series uses a card deck.
+     *
+     * Typed as unknown here on purpose: src/types is shared with the browser
+     * bundle, and the card types live with the components that render them.
+     * The pipeline and the composition both narrow it to CardSpec.
+     */
+    cardSpec?: unknown;
+
     // Absolute position on the reel timeline, filled in once the voiceover
     // exists and its word timings are known.
     startMs?: number;

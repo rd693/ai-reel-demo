@@ -13,6 +13,8 @@ import { persistMedia } from "../media/persistDataUrl";
 import { assignSceneTimings, estimateCaptionWords, resolveDurationMs } from "./timing";
 import { planShots, summarizeShotPlan } from "./shotPlan";
 import { assignShotMedia, resolveFormat } from "./format";
+import { planCards } from "./planCards";
+import { resolveDeck } from "../../compositions/cards/deck";
 
 // Reported stages, in order. These drive the UI only.
 export const STAGES = ["pending", "scripted", "voicing", "visualizing", "completed"] as const;
@@ -48,16 +50,28 @@ async function looksGenerated(publicPath: string | undefined): Promise<boolean> 
     }
 }
 
+/**
+ * Whether a shot still owes an image.
+ *
+ * On a card reel this is not the same as "has no background": a statement page
+ * is type alone and was never meant to have one. Counting those as missing
+ * would mark every card reel failed and send every retry back to the image
+ * provider for pictures nothing will ever show.
+ */
+function wantsImage(scene: { backgroundPath?: string | null; visualPrompt?: string | null }): boolean {
+    return !scene.backgroundPath && !!scene.visualPrompt?.trim();
+}
+
 function inspect(reel: {
     script: string;
     voiceoverPath: string | null;
     actualDurationMs: number | null;
-    scenes: { backgroundPath: string | null }[];
+    scenes: { backgroundPath: string | null; visualPrompt: string | null }[];
 }): Progress {
     return {
         hasScript: !!reel.script?.trim() && reel.scenes.length > 0,
         hasVoiceover: !!reel.voiceoverPath && !!reel.actualDurationMs,
-        missingImages: reel.scenes.filter((s) => !s.backgroundPath).length,
+        missingImages: reel.scenes.filter(wantsImage).length,
     };
 }
 
@@ -117,6 +131,8 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
     const usePremium = row.usePremiumImageStack || series.usePremiumImageStack;
     const format = resolveFormat(row.format, series.format);
     const targetDuration = series.targetDuration || 60;
+    // A series without a deck keeps the original full-bleed slideshow.
+    const deck = series.deckId ? resolveDeck(series.deckId) : null;
 
     const progress = inspect(row);
     console.log(
@@ -217,17 +233,45 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
             // Beats become shots here, once the real audio length is known.
             // Doing it earlier would cut against an estimate, and the estimate
             // is routinely 30% out.
-            const shots = assignShotMedia(planShots(timed, captionWords), format);
+            // Cards are printed stills, so a card reel never plans motion: a
+            // clip inside a page would be a video playing on a sheet of paper.
+            const planned = planShots(timed, captionWords);
+            const shots = deck ? planned : assignShotMedia(planned, format);
             const motionCount = shots.filter((s) => s.backgroundType === "video").length;
             console.log(
                 `[pipeline ${reelId}] shot plan — ${timed.length} beats → ${summarizeShotPlan(shots)}; ` +
-                    `format ${format}, ${motionCount} motion shot(s)`,
+                    `format ${deck ? `cards (${deck.id})` : format}, ${motionCount} motion shot(s)`,
             );
+
+            let laidOut = shots;
+            if (deck) {
+                const plan = await planCards(
+                    shots.map((shot, index) => ({
+                        index,
+                        narrationText: shot.narrationText ?? shot.headline ?? "",
+                        durationInSeconds: shot.durationInSeconds ?? 3,
+                    })),
+                    deck,
+                    options.subject ?? series.niche,
+                );
+                // The page decides what gets drawn, so the subject replaces the
+                // cinematographer's scene prompt entirely. A page with no
+                // subject is set in type alone and asks for no image at all.
+                laidOut = shots.map((shot, i) => ({
+                    ...shot,
+                    cardSpec: plan.cards[i],
+                    visualPrompt: plan.subjects[i],
+                    backgroundType: "image" as const,
+                }));
+            }
 
             await reelRepo.update(reelId, {
                 actualDuration: durationMs,
                 captionWords,
-                scenes: shots,
+                scenes: laidOut,
+                // Recorded on the reel, so the renderer knows which composition
+                // prints it without having to go back to the series.
+                ...(deck ? { deckId: deck.id } : {}),
             });
             await reelRepo.setStatus(reelId, "voicing");
         }
@@ -236,7 +280,7 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
         current = await reelRepo.getById(reelId);
         if (!current) throw new Error("Reel disappeared mid-generation");
 
-        if (current.scenes.some((s) => !s.backgroundUrl)) {
+        if (current.scenes.some((s) => wantsImage({ backgroundPath: s.backgroundUrl, visualPrompt: s.visualPrompt }))) {
             await reelRepo.setStatus(reelId, "visualizing");
 
             const seed = current.seed ?? Math.floor(Math.random() * 2147483647);
@@ -262,6 +306,8 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                 // Already-generated scenes are skipped, so a retry only pays for
                 // the images that are actually missing.
                 if (scenes[i].backgroundUrl) continue;
+                // A statement page carries no subject and wants no picture.
+                if (deck && !scenes[i].visualPrompt?.trim()) continue;
 
                 const prompt = scenes[i].visualPrompt || scenes[i].narrationText || series.niche;
                 console.log(
@@ -272,7 +318,9 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                 try {
                     const url = await generateImage({
                         prompt,
-                        style: artStyle,
+                        // A deck draws its own illustrations: one isolated
+                        // subject on plain stock, never a scene.
+                        style: deck ? deck.imageStyle : artStyle,
                         // Per shot, not per reel. One seed for the whole reel
                         // was meant to hold the look together, but a fixed seed
                         // with a near-identical prompt reproduces the same
@@ -342,7 +390,10 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
         // whose image provider failed on every scene is not "completed", and
         // saying so is what lets a retry pick up the missing ones.
         const final = await reelRepo.getById(reelId);
-        const stillMissing = final?.scenes.filter((s) => !s.backgroundUrl).length ?? 0;
+        const stillMissing =
+            final?.scenes.filter((s) =>
+                wantsImage({ backgroundPath: s.backgroundUrl, visualPrompt: s.visualPrompt }),
+            ).length ?? 0;
 
         if (stillMissing > 0) {
             const message = `${stillMissing} of ${final?.scenes.length} scenes have no image. Retry to generate just those.`;

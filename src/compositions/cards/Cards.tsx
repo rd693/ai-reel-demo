@@ -39,7 +39,7 @@ const DisplayLine: React.FC<{
     return (
         <div
             style={{
-                fontFamily: `"${deck.fonts.display}", sans-serif`,
+                fontFamily: deck.fonts.display,
                 fontWeight: 700,
                 fontSize: size * deck.fonts.displayScale,
                 lineHeight: deck.fonts.displayLeading,
@@ -192,7 +192,7 @@ const Annotation: React.FC<{
                     top: `${from.y}%`,
                     transform: "translate(-100%, -50%)",
                     paddingRight: 18,
-                    fontFamily: `"${deck.fonts.label}", monospace`,
+                    fontFamily: deck.fonts.label,
                     fontWeight: 700,
                     fontSize: 34,
                     letterSpacing: deck.fonts.labelTracking,
@@ -214,9 +214,9 @@ const SpecimenTag: React.FC<{ deck: Deck; tag: NonNullable<CardSpec["tag"]> }> =
         <div
             style={{
                 position: "absolute",
-                left: MARGIN + 40,
-                bottom: 560,
-                padding: "22px 46px",
+                left: MARGIN,
+                bottom: 300,
+                padding: "20px 40px",
                 background: "rgba(255,252,240,0.78)",
                 border: `1px solid ${deck.colors.ink}33`,
                 boxShadow: "0 6px 18px rgba(0,0,0,0.16)",
@@ -230,7 +230,7 @@ const SpecimenTag: React.FC<{ deck: Deck; tag: NonNullable<CardSpec["tag"]> }> =
         >
             <div
                 style={{
-                    fontFamily: `"${deck.fonts.label}", monospace`,
+                    fontFamily: deck.fonts.label,
                     fontWeight: 700,
                     fontSize: 36,
                     letterSpacing: deck.fonts.labelTracking,
@@ -242,7 +242,7 @@ const SpecimenTag: React.FC<{ deck: Deck; tag: NonNullable<CardSpec["tag"]> }> =
             {tag.subtitle && (
                 <div
                     style={{
-                        fontFamily: `"${deck.fonts.label}", monospace`,
+                        fontFamily: deck.fonts.label,
                         fontSize: 26,
                         letterSpacing: deck.fonts.labelTracking,
                         color: deck.colors.muted,
@@ -264,7 +264,7 @@ const SideNote: React.FC<{ deck: Deck; text: string; dark?: boolean }> = ({ deck
             right: 26,
             top: "38%",
             writingMode: "vertical-rl",
-            fontFamily: `"${deck.fonts.label}", monospace`,
+            fontFamily: deck.fonts.label,
             fontSize: 22,
             letterSpacing: "0.3em",
             color: dark ? deck.colors.darkInk : deck.colors.muted,
@@ -400,7 +400,7 @@ const ListRow: React.FC<{
             <div style={{ position: "relative" }}>
                 <span
                     style={{
-                        fontFamily: `"${deck.fonts.display}", sans-serif`,
+                        fontFamily: deck.fonts.display,
                         fontSize: 86 * deck.fonts.displayScale,
                         lineHeight: 1,
                         textTransform: deck.uppercase ? "uppercase" : "none",
@@ -459,7 +459,7 @@ const ListCard: React.FC<{ deck: Deck; spec: CardSpec }> = ({ deck, spec }) => {
             >
                 <div
                     style={{
-                        fontFamily: `"${deck.fonts.label}", monospace`,
+                        fontFamily: deck.fonts.label,
                         fontWeight: 700,
                         fontSize: 30,
                         letterSpacing: deck.fonts.labelTracking,

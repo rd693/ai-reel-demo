@@ -1,5 +1,6 @@
 import { Composition } from "remotion";
 import { FacelessReelComposition } from "./compositions/FacelessReelComposition";
+import { CardReelComposition } from "./compositions/CardReelComposition";
 import { CardSample, SAMPLE_CARD } from "./compositions/CardSample";
 import { previewReel, PREVIEW_REEL_DURATION_SECONDS } from "./data/previewReel";
 
@@ -14,6 +15,17 @@ export const RemotionRoot = () => {
     <Composition
       id="FacelessReel"
       component={FacelessReelComposition}
+      width={1080}
+      height={1920}
+      fps={FPS}
+      durationInFrames={Math.ceil(PREVIEW_REEL_DURATION_SECONDS * FPS)}
+      defaultProps={{ reel: previewReel }}
+    />
+    {/* The same reel printed as pages. renderReel picks between this and
+        FacelessReel by whether the reel was laid out with a deck. */}
+    <Composition
+      id="CardReel"
+      component={CardReelComposition}
       width={1080}
       height={1920}
       fps={FPS}

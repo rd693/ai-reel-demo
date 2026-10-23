@@ -37,7 +37,9 @@ export interface Series {
         volume: number;
     };
     seriesContext?: string;
-    visualStylePrompt?: string; // ✅ Series-level visual style
+    visualStylePrompt?: string;
+    /** Card deck id. Unset means the original full-bleed slideshow. */
+    deckId?: string;
     usePremiumImageStack?: boolean; // ✅ Paid/Free stack toggle
     format?: ReelFormat; // stills, mixed, or motion — see src/lib/pipeline/format.ts
     captionStyle: {
@@ -69,6 +71,8 @@ export interface FacelessReel extends ReelData {
     artStyle?: ArtStyle; // ✅ Per-reel visual style override
     visualStyleOverride?: string; // ✅ Per-reel visual prompt override
     format?: ReelFormat; // overrides the series format when set
+    /** The deck this reel was printed with, copied from the series at layout time. */
+    deckId?: string;
     generationStatus: "pending" | "scripted" | "voicing" | "visualizing" | "rendering" | "completed" | "failed";
     generationError?: string; // Why the pipeline stopped, when generationStatus is "failed"
     scheduledFor?: Date;
