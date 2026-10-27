@@ -21,6 +21,7 @@ function sceneRows(scenes: PersistedScene[]) {
         backgroundType: scene.backgroundType ?? "image",
         shotType: scene.shotType ?? null,
         motionPrompt: scene.motionPrompt ?? null,
+        cardSpec: scene.cardSpec ? JSON.stringify(scene.cardSpec) : null,
         durationInSeconds: scene.durationInSeconds ?? 3,
         startMs: scene.startMs ?? null,
         endMs: scene.endMs ?? null,
@@ -37,6 +38,7 @@ function reelRows(input: Partial<ReelInput>) {
     if (input.artStyle !== undefined) data.artStyle = input.artStyle;
     if (input.visualStyleOverride !== undefined) data.visualStyleOverride = input.visualStyleOverride;
     if (input.format !== undefined) data.format = input.format;
+    if (input.deckId !== undefined) data.deckId = input.deckId;
     if (input.usePremiumImageStack !== undefined) data.usePremiumImageStack = input.usePremiumImageStack;
     if (input.seed !== undefined) data.seed = input.seed;
     if (input.voiceoverUrl !== undefined) data.voiceoverPath = input.voiceoverUrl;

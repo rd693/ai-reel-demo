@@ -39,6 +39,10 @@ model Series {
   format               String  @default("slideshow")
   seriesContext        String?
   visualStylePrompt    String?
+  // Which card deck prints this series — see src/compositions/cards/deck.ts.
+  // Null keeps the original full-bleed slideshow, so existing series are
+  // untouched by the card system until they opt in.
+  deckId               String?
 
   targetPlatforms String @default("[]") // JSON: ("tiktok"|"instagram"|"youtube")[]
   musicSettings   String // JSON: { enabled, trackId, volume }
@@ -70,6 +74,10 @@ model Reel {
   visualStyleOverride  String?
   usePremiumImageStack Boolean @default(false)
   format               String? // overrides the series format when set
+  // The deck this reel was actually printed with, copied from the series when
+  // its pages were planned. On the reel rather than only on the series so that
+  // changing a series' art direction does not re-print reels already made.
+  deckId               String?
   seed                 Int?
 
   // Path under public/, e.g. /voiceovers/voice-123.mp3 — never a data URL.
@@ -117,6 +125,10 @@ model Scene {
   // motion shot — what the clip should actually do.
   shotType     String? // wide | medium | close | detail
   motionPrompt String?
+
+  // JSON: the CardSpec this shot is printed as — layout, display words,
+  // annotation. Null for a shot in a reel that is not using a deck.
+  cardSpec     String?
 
   durationInSeconds Float @default(3)
 

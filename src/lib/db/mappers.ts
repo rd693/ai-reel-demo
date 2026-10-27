@@ -61,6 +61,7 @@ export function toScene(row: SceneRow): PersistedScene {
         backgroundType: (row.backgroundType as "image" | "video" | null) ?? undefined,
         shotType: (row.shotType as ReelScene["shotType"] | null) ?? undefined,
         motionPrompt: row.motionPrompt ?? undefined,
+        cardSpec: row.cardSpec ? parseJson<unknown>(row.cardSpec, undefined) : undefined,
         startMs: row.startMs ?? undefined,
         endMs: row.endMs ?? undefined,
     };
@@ -85,6 +86,7 @@ export function toReel(row: ReelWithScenes): FacelessReel {
         artStyle: (row.artStyle as ArtStyle | null) ?? undefined,
         visualStyleOverride: row.visualStyleOverride ?? undefined,
         format: row.format ? resolveFormat(row.format) : undefined,
+        deckId: row.deckId ?? undefined,
         usePremiumImageStack: row.usePremiumImageStack,
         // Domain keeps the name `voiceoverUrl`; the column is a path by design.
         voiceoverUrl: row.voiceoverPath ?? undefined,
@@ -122,6 +124,7 @@ export function toSeries(row: SeriesWithReels): Series {
         captionStyle: parseJson(row.captionStyle, DEFAULT_CAPTION_STYLE),
         seriesContext: row.seriesContext ?? undefined,
         visualStylePrompt: row.visualStylePrompt ?? undefined,
+        deckId: row.deckId ?? undefined,
         usePremiumImageStack: row.usePremiumImageStack,
         format: resolveFormat(row.format),
         status: row.status as Series["status"],

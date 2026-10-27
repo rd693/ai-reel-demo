@@ -102,15 +102,21 @@ export async function renderReelToMp4({
     const durationInFrames = Math.ceil((Math.max(1, durationMs / 1000)) * fps);
 
     console.log(
-        `[Remotion] Rendering ${reelId}: ${(durationMs / 1000).toFixed(2)}s (${durationInFrames} frames)`,
+        `[Remotion] Rendering ${reelId}: ${(durationMs / 1000).toFixed(2)}s (${durationInFrames} frames)` +
+            (reelData.deckId ? ` as cards (${reelData.deckId})` : ""),
     );
 
     const serveUrl = await getBundle();
     const inputProps = { reel: absoluteReelData };
 
+    // Which composition prints this reel. A reel laid out with a card deck is
+    // a different thing from a slideshow — no captions, no Ken Burns — so it
+    // gets its own composition rather than a pile of conditionals inside one.
+    const compositionId = reelData.deckId ? "CardReel" : "FacelessReel";
+
     const composition = await selectComposition({
         serveUrl,
-        id: "FacelessReel",
+        id: compositionId,
         inputProps,
     });
 
