@@ -30,12 +30,14 @@ const IMAGE_SIZES: Record<NonNullable<GenerateImageOptions["aspect"]>, ImageSize
 /**
  * Longest side each generator will actually honour.
  *
- * FLUX.1 [pro] rejects a side over 1440, so a reel asks fal for 800x1440 —
- * still 1.4x the pixels of the old request. The free generators stay where
- * they were; raising them only produces slower, not better, images.
+ * fal bills FLUX 1.1 [pro] per megapixel, rounded up. 800x1440 is 1.15MP
+ * and was billed as 2 — $0.08 a shot, $1.84 for a 23-shot reel. 736x1312 is
+ * 0.97MP, billed as 1, for half the price; the composition scales every shot
+ * to 1080x1920 either way. The free generators stay where they were; raising
+ * them only produces slower, not better, images.
  */
 const MAX_SIDE = {
-    fal: 1440,
+    fal: 1312,
     free: 1344,
 } as const;
 
