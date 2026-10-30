@@ -743,13 +743,28 @@ FINAL REMINDER:
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-                        generationConfig: { temperature: 0.9, maxOutputTokens: 4000 }
+                        // This model thinks before it answers, and thinking is
+                        // billed against maxOutputTokens. At 4000 a Hindi script
+                        // was cut off before its JSON closed, every time, and the
+                        // reel was voiced from the static fallback instead.
+                        generationConfig: {
+                            temperature: 0.9,
+                            maxOutputTokens: 16000,
+                            responseMimeType: "application/json",
+                        }
                     })
                 }
             );
             if (res.ok) {
                 const data = await res.json();
-                const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                const candidate = data.candidates?.[0];
+                const text = (candidate?.content?.parts ?? [])
+                    .filter((p: { thought?: boolean }) => !p.thought)
+                    .map((p: { text?: string }) => p.text ?? "")
+                    .join("");
+                if (candidate?.finishReason && candidate.finishReason !== "STOP") {
+                    console.warn(`[LLM] Gemini stopped early: ${candidate.finishReason}`);
+                }
                 const result = parseJSON(text);
                 console.log(`[LLM] ✅ Gemini success — ${result.scenes.length} scenes`);
                 return enrichWithSubject(result, resolvedSubject, stylePrompt, visualStylePrompt, visualStyleOverride, !isCustom);
@@ -773,15 +788,15 @@ FINAL REMINDER:
         );
     }
 
-    // 5. Static fallback (absolute last resort)
-    console.error("[LLM] ALL providers failed — using static fallback");
-    return enrichWithSubject(
-        staticFallback(resolvedSubject, effectiveLanguage, durationInSeconds, sceneCount, sceneDuration, stylePrompt),
-        resolvedSubject,
-        stylePrompt,
-        visualStylePrompt,
-        visualStyleOverride,
-        true,
+    // 5. Nothing worked. Fail rather than return the static fallback: it is
+    // "<subject> की यह कहानी का भाग 1 … भाग 7", and the pipeline cannot tell it
+    // from a real script — it was voiced, captioned and turned into image
+    // prompts, so a model outage became a billed reel of one repeated line.
+    // Failing leaves no script on the row, so the topic goes back to the queue
+    // and Resume retries the script stage.
+    console.error("[LLM] ALL providers failed — no script");
+    throw new Error(
+        "Script generation failed on every configured model. Check the server log for each provider's error.",
     );
 }
 
@@ -1054,45 +1069,4 @@ function parseJSON(raw: string): GeneratedScript {
     } catch (e: any) {
         throw new Error(`JSON parse failed: ${e.message}`);
     }
-}
-
-// ─────────────────────────────────────────────────────────────
-// STATIC FALLBACK — absolute last resort
-// ─────────────────────────────────────────────────────────────
-function staticFallback(
-    subject: string,
-    language: string,
-    durationInSeconds: number,
-    sceneCount: number,
-    sceneDuration: number,
-    stylePrompt: string
-): GeneratedScript {
-    const isHindi = language.toLowerCase() === 'hindi';
-
-    const visualMoments = [
-        "heroic introduction, standing tall, wide establishing shot against vast landscape",
-        "early life struggle, humble origins, medium shot in simple surroundings",
-        "rising conflict, fierce determination, low angle shot against stormy sky",
-        "pivotal battle or challenge, action shot, weapons or conflict visible",
-        "moment of crisis, extreme close-up of face, raw emotion visible",
-        "turning point decision, candlelit chamber, over-shoulder perspective",
-        "triumph achieved, arms raised, aerial wide shot, golden light",
-        "lasting legacy, reverent final shot, soft warm light"
-    ];
-
-    const scenes = Array.from({ length: sceneCount }, (_, i) => ({
-        headline: isHindi ? `भाग ${i + 1}` : `Part ${i + 1}`,
-        narrationText: isHindi
-            ? `${subject} की यह कहानी का भाग ${i + 1}।`
-            : `Part ${i + 1} of ${subject}'s story.`,
-        visualPrompt: `${subject}, ${visualMoments[i % visualMoments.length]}, ${stylePrompt.split(',').slice(0, 4).join(',')}, no text`,
-        durationInSeconds: sceneDuration
-    }));
-
-    return {
-        title: subject,
-        subject,
-        script: scenes.map(s => s.narrationText).join(" "),
-        scenes
-    };
 }

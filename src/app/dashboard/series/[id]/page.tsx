@@ -103,7 +103,6 @@ export default function SeriesDetailPage() {
             };
             setSeries(enrichedSeries);
             setTempSeries(enrichedSeries);
-            setGenNiche(enrichedSeries.niche || '');
             // getById already returns reels ordered newest-first.
             setReels(found.reels ?? []);
         })();
@@ -176,8 +175,11 @@ export default function SeriesDetailPage() {
             // The server owns the pipeline now. This returns as soon as the row
             // exists; generation continues even if this tab is closed.
             const reel = await seriesStore.startGeneration(seriesId, {
-                niche: genMode === 'auto' ? genNiche : series.niche,
-                subject: genNiche || series.niche,
+                // Only send a subject the user typed. Any subject at all makes
+                // the server skip the topic queue, so defaulting to the niche
+                // here meant "Make this the next reel" never took effect.
+                niche: genMode === 'auto' ? genNiche || undefined : series.niche,
+                subject: genNiche || undefined,
                 customScript: genMode === 'custom' ? customScript : undefined,
                 artStyle: finalArtStyle,
                 visualStyleOverride,
@@ -287,7 +289,7 @@ export default function SeriesDetailPage() {
                                         value={genNiche}
                                         onChange={(e) => setGenNiche(e.target.value)}
                                         className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-5 focus:outline-none focus:border-indigo-500/30 focus:bg-white transition-all text-lg font-medium text-slate-900 mt-2"
-                                        placeholder="e.g. Prithviraj Chauhan, Life of Steve Jobs..."
+                                        placeholder="Leave empty for the next queued topic"
                                     />
                                 </div>
                             )}

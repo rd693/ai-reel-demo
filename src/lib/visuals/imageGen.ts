@@ -267,6 +267,10 @@ async function generateWithReelShorts(args: {
                 console.log("[ImageGen] ReelShorts success:", url);
                 return url;
             }
+            console.warn(
+                `[ImageGen] ReelShorts attempt ${attempt} returned no usable image:`,
+                typeof url === "string" ? url : JSON.stringify(data).slice(0, 200),
+            );
         } catch (error) {
             console.warn(`[ImageGen] ReelShorts attempt ${attempt} failed:`, error);
             await sleep(1000 * attempt);
@@ -348,6 +352,7 @@ async function generateWithPollinations(args: {
             console.log("[ImageGen] Pollinations success");
             return url;
         }
+        console.warn(`[ImageGen] Pollinations failed: ${res.status}`);
     } catch (error) {
         console.warn("[ImageGen] Pollinations failed:", error);
     }
