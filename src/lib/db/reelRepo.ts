@@ -44,6 +44,7 @@ function reelRows(input: Partial<ReelInput>) {
     if (input.voiceoverUrl !== undefined) data.voiceoverPath = input.voiceoverUrl;
     if (input.actualDuration !== undefined) data.actualDurationMs = Math.round(input.actualDuration);
     if (input.captionWords !== undefined) data.captionWords = JSON.stringify(input.captionWords ?? []);
+    if (input.publishCopy !== undefined) data.publishCopy = input.publishCopy ? JSON.stringify(input.publishCopy) : null;
     if (input.generationStatus !== undefined) data.generationStatus = input.generationStatus;
     if (input.musicSettings !== undefined) data.musicSettings = JSON.stringify(input.musicSettings);
     if (input.captionStyle !== undefined) data.captionStyle = JSON.stringify(input.captionStyle);

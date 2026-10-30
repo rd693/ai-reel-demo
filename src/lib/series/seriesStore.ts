@@ -1,4 +1,4 @@
-import { Series, FacelessReel } from "../../types/series";
+import { Series, FacelessReel, PublishCopy } from "../../types/series";
 
 // Was a localStorage store. That capped everything at the ~5MB quota and, once
 // full, silently dropped the oldest reels to make room (base64 voiceovers ate
@@ -103,6 +103,11 @@ export const seriesStore = {
     /** Retries a failed reel, skipping the stages that already succeeded. */
     resumeGeneration(reelId: string): Promise<FacelessReel> {
         return request<FacelessReel>(`/api/reels/${reelId}/generate`, { method: "POST" });
+    },
+
+    /** Writes (or rewrites) the title, description, hashtags and tags for upload. */
+    writePublishCopy(reelId: string): Promise<PublishCopy> {
+        return request<PublishCopy>(`/api/reels/${reelId}/publish-copy`, { method: "POST" });
     },
 
     startRender(reelId: string): Promise<RenderJob> {

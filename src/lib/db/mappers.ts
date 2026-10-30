@@ -4,7 +4,7 @@ import type {
     SceneModel as SceneRow,
     RenderJobModel as RenderJobRow,
 } from "../../generated/prisma/models";
-import type { ArtStyle, FacelessReel, Series } from "../../types/series";
+import type { ArtStyle, FacelessReel, PublishCopy, Series } from "../../types/series";
 import type { ReelScene, UGCSceneType } from "../../types/reel";
 import { resolveFormat } from "../pipeline/format";
 
@@ -92,6 +92,7 @@ export function toReel(row: ReelWithScenes): FacelessReel {
         voiceoverUrl: row.voiceoverPath ?? undefined,
         actualDuration: row.actualDurationMs ?? undefined,
         captionWords: parseJson<unknown[]>(row.captionWords, []),
+        publishCopy: row.publishCopy ? parseJson<PublishCopy | undefined>(row.publishCopy, undefined) : undefined,
         generationStatus: row.generationStatus as FacelessReel["generationStatus"],
         // The pipeline records why a stage failed; without this the UI could
         // only say "failed" and never why.

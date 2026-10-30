@@ -8,6 +8,7 @@ import { seriesStore, type RenderJob } from "@/lib/series/seriesStore";
 import { resolveMediaUrl } from "@/lib/media/resolveMediaUrl";
 import { Series, FacelessReel } from "@/types/series";
 import { createTimeline } from "@/agents/timelineAgent";
+import { PublishCopyPanel } from "@/components/PublishCopyPanel";
 
 const FacelessReelComposition = dynamic(() => import("@/compositions/FacelessReelComposition").then(mod => mod.FacelessReelComposition), { ssr: false });
 const Player = dynamic(() => import("@remotion/player").then(mod => mod.Player), { ssr: false });
@@ -551,6 +552,13 @@ export default function ReelDetailPage() {
                             </span>
                         </div>
                     </div>
+
+                    <PublishCopyPanel
+                        reelId={reel.id!}
+                        copy={reel.publishCopy}
+                        canWrite={!!reel.script?.trim() && !isGenerating}
+                        onChange={(publishCopy) => setReel({ ...reel, publishCopy })}
+                    />
 
                     {/* Production Narrative */}
                     <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">

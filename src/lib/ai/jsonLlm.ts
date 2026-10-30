@@ -161,7 +161,7 @@ async function viaGemini<T>(req: JsonLlmRequest): Promise<JsonLlmResult<T> | nul
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) return null;
-    return { data: extractJson<T>(text), provider: "gemini-2.0-flash" };
+    return { data: extractJson<T>(text), provider: "gemini-3.8-flash" };
 }
 
 /**

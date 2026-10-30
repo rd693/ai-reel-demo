@@ -14,6 +14,7 @@ import { planShots, summarizeShotPlan, stripCameraAngle } from "../src/lib/pipel
 import { assignShotMedia } from "../src/lib/pipeline/format";
 import { speakable, speakableDiff } from "../src/lib/audio/speakable";
 import { imageSubject } from "../src/lib/ai/llm";
+import { normalizeHashtags, fitTags, toPublishCopy } from "../src/lib/pipeline/publishCopy";
 import {
     kenBurns,
     transitionFor,
@@ -167,6 +168,37 @@ for (let f = 0; f < total; f++) {
     if (!covered) uncovered++;
 }
 check("no frame of the reel is uncovered", uncovered === 0, `${uncovered}/${total}`);
+
+console.log("\nupload copy");
+{
+    const tags = normalizeHashtags(["#history", "History", "#Malik Ambar", "#shorts", "#a", "#b", "#c", "#d"]);
+    check("#Shorts comes first, once", tags[0] === "#Shorts" && tags.filter((t) => t.toLowerCase() === "#shorts").length === 1);
+    check("hashtags are one word and deduplicated", tags.every((t) => !/\s/.test(t)) && tags.length === new Set(tags.map((t) => t.toLowerCase())).size);
+    check("at most five hashtags", tags.length <= 5);
+
+    const many = Array.from({ length: 80 }, (_, i) => `search phrase number ${i}`);
+    const fitted = fitTags(many);
+    const cost = fitted.reduce((n, t, i) => n + t.length + (t.includes(" ") ? 2 : 0) + (i ? 1 : 0), 0);
+    check("tags fit YouTube's 500-character budget", cost <= 500, `${cost} chars, ${fitted.length} tags`);
+
+    const copy = toPublishCopy(
+        {
+            title: "x ".repeat(80) + "#Shorts",
+            description: "Hook <b>line</b>\n\n\n\nBody #tag inside",
+            hashtags: ["#Itihas"],
+            tags: ["a", "a", "b,c"],
+            category: "Not a category",
+        },
+        { title: "fallback", script: "s", niche: "history", language: "hindi", artStyle: "realism" },
+        "test",
+    );
+    check("title is at most 100 characters, with no hashtags", copy.title.length <= 100 && !copy.title.includes("#"), `${copy.title.length}`);
+    check("description has no < or >", !/[<>]/.test(copy.description));
+    check("description ends with the hashtag line, once", copy.description.endsWith("#Shorts #Itihas") && !copy.description.includes("#tag"));
+    check("an unknown category falls back to Education", copy.settings.category === "Education" && copy.settings.categoryId === "27");
+    check("hindi maps to hi", copy.settings.language === "hi");
+    check("photoreal styles are flagged for disclosure", copy.settings.alteredContent === true);
+}
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);

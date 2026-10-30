@@ -77,6 +77,8 @@ export interface FacelessReel extends ReelData {
     generationError?: string; // Why the pipeline stopped, when generationStatus is "failed"
     scheduledFor?: Date;
     publishedAt?: Date;
+    /** Upload copy for YouTube, written once the script exists. */
+    publishCopy?: PublishCopy;
     musicSettings?: Series['musicSettings'];
     captionStyle?: Series['captionStyle'];
     socialLinks?: {
@@ -90,3 +92,37 @@ export type SceneSegment = ReelScene & {
     narrationText: string; // Specific text being spoken during this scene
     visualPrompt: string; // Prompt used to generate the background for this scene
 };
+
+/**
+ * Everything the YouTube upload form asks for, ready to paste.
+ *
+ * Text fields are already inside YouTube's limits (see publishCopy.ts), so the
+ * dashboard can copy them verbatim.
+ */
+export interface PublishCopy {
+    /** At most 100 characters — YouTube's hard limit. */
+    title: string;
+    /** Hook line, summary, comment prompt, then the hashtags. At most 5000 characters. */
+    description: string;
+    /** Each starts with "#"; the first three show above the title on YouTube. */
+    hashtags: string[];
+    /** Search keywords for the Tags field, 500 characters in total at most. */
+    tags: string[];
+    /** A question to pin as the first comment, to start the thread. */
+    pinnedComment?: string;
+    settings: {
+        /** YouTube category name and its API id. */
+        category: string;
+        categoryId: string;
+        /** BCP-47 code for "Video language". */
+        language: string;
+        madeForKids: false;
+        /**
+         * Answer for "Altered or synthetic content". Only realistic-looking
+         * generated media needs disclosing; stylised art does not.
+         */
+        alteredContent: boolean;
+    };
+    generatedAt: string;
+    provider: string;
+}

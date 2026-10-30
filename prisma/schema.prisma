@@ -85,6 +85,10 @@ model Reel {
   actualDurationMs Int?
   captionWords     String? // JSON: { word, start, end }[]
 
+  // JSON: PublishCopy — the title, description, hashtags and tags to paste
+  // into the upload form. See src/lib/pipeline/publishCopy.ts.
+  publishCopy String?
+
   // pending | scripted | voicing | visualizing | rendering | completed | failed
   generationStatus String  @default("pending")
   generationError  String?

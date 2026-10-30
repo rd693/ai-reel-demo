@@ -12,6 +12,7 @@ import { transcribeAudio } from "../audio/transcribe";
 import { persistMedia } from "../media/persistDataUrl";
 import { assignSceneTimings, estimateCaptionWords, resolveDurationMs } from "./timing";
 import { planShots, summarizeShotPlan } from "./shotPlan";
+import { writePublishCopy } from "./publishCopy";
 import { assignShotMedia, resolveFormat } from "./format";
 import { planCards } from "./planCards";
 import { resolveDeck } from "../../compositions/cards/deck";
@@ -204,9 +205,32 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
             await reelRepo.setStatus(reelId, "scripted");
         }
 
-        // ── Stage 2: voiceover ────────────────────────────────────────────
         let current = await reelRepo.getById(reelId);
         if (!current) throw new Error("Reel disappeared mid-generation");
+
+        // ── Upload copy: title, description, hashtags, tags ──────────────
+        // Needs only the script, so it runs here rather than at the end. It
+        // is not a stage the reel waits on: a reel without copy is still a
+        // finished video, and the reel page can write the copy later.
+        if (!current.publishCopy && current.script?.trim()) {
+            try {
+                const copy = await writePublishCopy({
+                    title: current.businessName,
+                    script: current.script,
+                    niche: options.niche ?? series.niche,
+                    language,
+                    artStyle,
+                    seriesContext: series.seriesContext,
+                    angle: options.topicAngle,
+                });
+                await reelRepo.update(reelId, { publishCopy: copy });
+                console.log(`[pipeline ${reelId}] upload copy — "${copy.title}"`);
+            } catch (error) {
+                console.warn(`[pipeline ${reelId}] upload copy skipped:`, error instanceof Error ? error.message : error);
+            }
+        }
+
+        // ── Stage 2: voiceover ────────────────────────────────────────────
 
         if (!progress.hasVoiceover) {
             console.log(`[pipeline ${reelId}] voiceover`);
