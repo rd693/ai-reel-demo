@@ -34,17 +34,29 @@ type RenderReelOptions = {
 // racing to build several.
 let bundlePromise: Promise<string> | null = null;
 
-function getBundle(): Promise<string> {
+async function getBundle(): Promise<string> {
+    const cached = bundlePromise;
+    if (cached) {
+        // The bundle lives in the OS temp folder, which macOS clears of anything
+        // unused for a few days. The worker runs for longer than that, and it
+        // kept handing out the path of a folder that no longer existed, failing
+        // every render until it was restarted.
+        const dir = await cached.catch(() => null);
+        if (dir && fs.existsSync(path.join(dir, "index.html"))) return dir;
+        if (bundlePromise === cached) bundlePromise = null;
+    }
+
     if (!bundlePromise) {
-        console.log("[Remotion] Bundling project (first render)...");
-        bundlePromise = bundle({
+        console.log("[Remotion] Bundling project...");
+        const building: Promise<string> = bundle({
             entryPoint: path.join(process.cwd(), "src/index.ts"),
             publicDir: emptyPublicDir(),
         }).catch((err) => {
             // Never cache a failed bundle, or every later render inherits it.
-            bundlePromise = null;
+            if (bundlePromise === building) bundlePromise = null;
             throw err;
         });
+        bundlePromise = building;
     }
     return bundlePromise;
 }

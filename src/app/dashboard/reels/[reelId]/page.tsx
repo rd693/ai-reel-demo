@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Loader2, Video, Share2, Sparkles, Palette, Type, Check, Download, Trash2, Clock, RefreshCw, Film } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, Video, Share2, Sparkles, Palette, Type, Check, Download, Clock, RefreshCw, Film } from "lucide-react";
 import dynamic from "next/dynamic";
 import { seriesStore, type RenderJob } from "@/lib/series/seriesStore";
 import { resolveMediaUrl } from "@/lib/media/resolveMediaUrl";
 import { Series, FacelessReel } from "@/types/series";
 import { createTimeline } from "@/agents/timelineAgent";
 import { PublishCopyPanel } from "@/components/PublishCopyPanel";
+import { DeleteButton } from "@/components/DeleteButton";
+import { isPausedError } from "@/lib/scheduler/schedule";
 
 const FacelessReelComposition = dynamic(() => import("@/compositions/FacelessReelComposition").then(mod => mod.FacelessReelComposition), { ssr: false });
 const Player = dynamic(() => import("@remotion/player").then(mod => mod.Player), { ssr: false });
@@ -38,6 +40,7 @@ export default function ReelDetailPage() {
     const [series, setSeries] = useState<Series | null>(null);
     const [renderingStatus, setRenderingStatus] = useState<Partial<RenderJob> | null>(null);
     const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
+    const [resumeError, setResumeError] = useState<string | null>(null);
 
     const [assetsLoaded, setAssetsLoaded] = useState(false);
     const [preloadedCount, setPreloadedCount] = useState(0);
@@ -176,10 +179,11 @@ export default function ReelDetailPage() {
 
     const handleResume = async () => {
         if (!reelId) return;
+        setResumeError(null);
         try {
             setReel(await seriesStore.resumeGeneration(reelId));
         } catch (e) {
-            alert(e instanceof Error ? e.message : "Failed to resume generation");
+            setResumeError(e instanceof Error ? e.message : "Failed to resume generation");
         }
     };
 
@@ -228,13 +232,8 @@ export default function ReelDetailPage() {
 
     const handleDelete = async () => {
         if (!series || !reel || !reel.id) return;
-        if (!confirm("Are you sure you want to delete this reel?")) return;
-        try {
-            await seriesStore.deleteReel(reel.id);
-            router.push(`/dashboard/series/${series.id}`);
-        } catch (e) {
-            alert(e instanceof Error ? e.message : "Failed to delete reel");
-        }
+        await seriesStore.deleteReel(reel.id);
+        router.push(`/dashboard/series/${series.id}`);
     };
 
     const handlePromptChange = (index: number, newPrompt: string) => {
@@ -335,13 +334,12 @@ export default function ReelDetailPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <button
-                        onClick={handleDelete}
-                        className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all flex items-center gap-2 font-bold text-sm"
+                    <DeleteButton
+                        onDelete={handleDelete}
+                        className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
                         title="Delete Reel"
-                    >
-                        <Trash2 size={18} />
-                    </button>
+                        iconSize={18}
+                    />
                     <button
                         onClick={handleRenderReel}
                         // Exporting mid-generation would render whatever scenes
@@ -421,12 +419,17 @@ export default function ReelDetailPage() {
                                 </div>
                             ) : reel.generationStatus === "failed" ? (
                                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-6 text-center">
-                                    <h3 className="text-base font-bold text-red-400 mb-2">Generation failed</h3>
+                                    <h3 className={`text-base font-bold mb-2 ${isPausedError(reel.generationError) ? "text-amber-400" : "text-red-400"}`}>
+                                        {isPausedError(reel.generationError) ? "Generation paused" : "Generation failed"}
+                                    </h3>
                                     <p className="text-slate-400 text-[11px] leading-relaxed font-medium mb-5">
                                         {reel.generationError || "The pipeline stopped before finishing."}
-                                        {" "}Resuming picks up from the last completed stage rather than
-                                        starting over.
+                                        {" "}
+                                        {isPausedError(reel.generationError)
+                                            ? "The worker continues it automatically, or resume it now."
+                                            : "Resuming picks up from the last completed stage rather than starting over."}
                                     </p>
+                                    {resumeError && <p className="text-red-400 text-[11px] font-bold mb-3">{resumeError}</p>}
                                     <button
                                         onClick={handleResume}
                                         className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2"
@@ -508,6 +511,13 @@ export default function ReelDetailPage() {
                                 )}
                             </button>
 
+                            {renderingStatus?.status === 'failed' && (
+                                <p className="text-xs font-medium text-red-500 leading-relaxed break-words">
+                                    Export failed: {renderingStatus.error || "unknown error"}. The reel itself is
+                                    fine, so nothing is lost; try again.
+                                </p>
+                            )}
+
                             {renderingStatus?.outputPath && (
                                 <a
                                     href={renderingStatus.outputPath}
@@ -519,13 +529,11 @@ export default function ReelDetailPage() {
                                 </a>
                             )}
                             
-                            <button
-                                onClick={handleDelete}
-                                className="w-full py-4 text-slate-400 hover:text-red-500 transition-colors flex items-center justify-center gap-2 font-bold text-sm"
-                            >
-                                <Trash2 size={16} />
-                                Delete Asset Forever
-                            </button>
+                            <DeleteButton
+                                onDelete={handleDelete}
+                                idleLabel="Delete Asset Forever"
+                                className="w-full py-4 text-slate-400 hover:text-red-500 transition-colors"
+                            />
                         </div>
                     </div>
                 </div>

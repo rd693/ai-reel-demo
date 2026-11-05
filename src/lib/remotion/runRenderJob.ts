@@ -167,11 +167,23 @@ async function requireMediaHost(scenes: { backgroundUrl?: string }[]): Promise<v
     }
 }
 
+/**
+ * Whether the app serving the shots is up at all, for a caller about to start a
+ * batch of renders. Any answer counts; the point is that something is listening.
+ */
+export async function mediaHostReachable(): Promise<boolean> {
+    return fetch(assetBaseUrl(), { method: "HEAD", signal: AbortSignal.timeout(10000) })
+        .then(() => true)
+        .catch(() => false);
+}
+
 /** Never rejects: every outcome is written to the job row and returned. */
 async function runJob(reelId: string, job: RenderJobView): Promise<RenderJobView> {
     const outputDir = path.join(process.cwd(), "public", "renders", reelId);
     const outputPath = path.join(outputDir, `${job.id}.mp4`);
     const publicPath = `/renders/${reelId}/${job.id}.mp4`;
+
+    let shotsComplete = false;
 
     try {
         // Read the reel here rather than reusing what the caller checked: a job
@@ -179,6 +191,7 @@ async function runJob(reelId: string, job: RenderJobView): Promise<RenderJobView
         // be what is saved now.
         const reel = await reelRepo.getById(reelId);
         if (!reel) throw new Error(`Reel ${reelId} no longer exists`);
+        shotsComplete = reel.scenes.every((scene) => !!scene.backgroundUrl);
 
         await requireMediaHost(reel.scenes);
 
@@ -208,7 +221,11 @@ async function runJob(reelId: string, job: RenderJobView): Promise<RenderJobView
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[render] Job ${job.id} failed:`, message);
         await renderJobRepo.markFailed(job.id, message).catch(() => {});
-        await reelRepo.setStatus(reelId, "failed", message).catch(() => {});
+        // A failed export says nothing about the reel. Writing it onto the reel
+        // showed "Generation failed" and a Resume button that had nothing to
+        // resume, for a reel with every shot in place. The job row carries the
+        // error, and the reel page shows it next to Export.
+        if (shotsComplete) await reelRepo.setStatus(reelId, "completed").catch(() => {});
     } finally {
         claimedReels.delete(reelId);
     }

@@ -108,3 +108,18 @@ export async function nextTopicFor(
 
     return topicRepo.nextPlanned(seriesId);
 }
+
+/**
+ * What a resumed reel needs to know about the topic it was claimed for.
+ *
+ * Without this, a reel paused before its script existed was written from the
+ * bare niche on resume, under a title promising something else.
+ */
+export async function topicOptionsForReel(reelId: string) {
+    const topic = await prisma.topicIdea.findFirst({
+        where: { usedReelId: reelId },
+        select: { title: true, subject: true, angle: true },
+    });
+    if (!topic) return {};
+    return { subject: topic.subject, topicTitle: topic.title, topicAngle: topic.angle ?? undefined };
+}

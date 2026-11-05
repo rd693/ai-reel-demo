@@ -8,6 +8,26 @@ export const INTERVAL_MS: Record<Exclude<Frequency, "manual">, number> = {
 /** Statuses that mean a reel is still being worked on. */
 export const IN_FLIGHT_STATUSES = ["pending", "scripted", "voicing", "visualizing", "rendering"];
 
+/**
+ * Marks a failure the scheduler may retry on its own.
+ *
+ * A reel stopped by a dropped connection or a stopped app has nothing wrong with
+ * it, and retrying costs only the stages still missing. A failure carrying any
+ * other message stays put until someone looks at it: a rejected prompt would
+ * fail, and bill, the same way every five minutes.
+ */
+const PAUSED_PREFIX = "Paused:";
+
+export const PAUSED_NO_INTERNET = `${PAUSED_PREFIX} no internet connection.`;
+export const PAUSED_INTERRUPTED = `${PAUSED_PREFIX} the app stopped before this reel finished.`;
+
+export function isPausedError(error: string | null | undefined): boolean {
+    return !!error?.startsWith(PAUSED_PREFIX);
+}
+
+/** The filter form of isPausedError, for queries. */
+export const PAUSED_ERROR_FILTER = { startsWith: PAUSED_PREFIX };
+
 export type DueInput = {
     frequency: string;
     status: string;

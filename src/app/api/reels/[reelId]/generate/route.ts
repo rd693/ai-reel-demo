@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { reelRepo } from "@/lib/db/reelRepo";
 import { generateReel, isGenerating } from "@/lib/pipeline/generateReel";
+import { topicOptionsForReel } from "@/lib/pipeline/topicQueue";
 
 type Params = { params: Promise<{ reelId: string }> };
 
@@ -28,9 +29,14 @@ export async function POST(_req: Request, { params }: Params) {
             );
         }
 
-        void generateReel(reelId);
+        // Saved, not just returned. The pipeline writes no status until a stage
+        // finishes, so the page's next poll read the old "failed", stopped
+        // polling and showed the reel as failed while it was generating.
+        await reelRepo.setStatus(reelId, "pending");
 
-        return NextResponse.json({ ...reel, generationStatus: "pending" }, { status: 202 });
+        void generateReel(reelId, await topicOptionsForReel(reelId));
+
+        return NextResponse.json({ ...reel, generationStatus: "pending", generationError: undefined }, { status: 202 });
     } catch (error) {
         console.error("[api/reels/:id/generate] failed:", error);
         return NextResponse.json({ error: "Failed to resume generation" }, { status: 500 });

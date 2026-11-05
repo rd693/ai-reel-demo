@@ -15,6 +15,9 @@ import { assignShotMedia } from "../src/lib/pipeline/format";
 import { speakable, speakableDiff } from "../src/lib/audio/speakable";
 import { imageSubject } from "../src/lib/ai/llm";
 import { normalizeHashtags, fitTags, toPublishCopy } from "../src/lib/pipeline/publishCopy";
+import { applyShotPrompts, cleanShotPrompt } from "../src/lib/pipeline/shotPrompts";
+import { parseReview } from "../src/lib/visuals/reviewImage";
+import { isDue, isPausedError, PAUSED_NO_INTERNET, PAUSED_INTERRUPTED } from "../src/lib/scheduler/schedule";
 import {
     kenBurns,
     transitionFor,
@@ -199,6 +202,38 @@ console.log("\nupload copy");
     check("hindi maps to hi", copy.settings.language === "hi");
     check("photoreal styles are flagged for disclosure", copy.settings.alteredContent === true);
 }
+
+console.log("\nshot prompts");
+{
+    const long = "An old stone courtyard at dawn with a tall iron pillar standing in the middle, seen from far away.";
+    const briefs = [{ visualPrompt: "a" }, { visualPrompt: "b" }, { visualPrompt: "c" }, { visualPrompt: "d" }];
+    const out = applyShotPrompts(
+        briefs,
+        { shots: [{ index: 0, prompt: long }, { index: 1, prompt: long }, { index: 2, prompt: "short" }] },
+        "soft light",
+    );
+    check("a good prompt is used, with the series look", out[0].visualPrompt === `${long}, soft light`);
+    check("a duplicate keeps the shot's own prompt", out[1].visualPrompt === "b");
+    check("an unusable prompt keeps the shot's own prompt", out[2].visualPrompt === "c");
+    check("a skipped shot keeps its own prompt", out[3].visualPrompt === "d");
+    check("devanagari is removed", !/[\u0900-\u097F]/.test(cleanShotPrompt(`${long} दिल्ली का स्तंभ`) ?? "x"));
+    check("prompts are capped", (cleanShotPrompt("word ".repeat(200)) ?? "").length <= 350);
+}
+
+console.log("\nimage review");
+check("a rejection is read", parseReview('{"ok":false,"problems":["rider backwards"],"fix":"rider faces forward"}')?.ok === false);
+check("a garbled answer means not checked, not rejected", parseReview("not json") === null);
+check("an answer with no verdict means not checked", parseReview('{"problems":[]}') === null);
+
+console.log("\npaused reels");
+check("no internet is retryable", isPausedError(PAUSED_NO_INTERNET));
+check("an interrupted run is retryable", isPausedError(PAUSED_INTERRUPTED));
+check("a real failure is not", !isPausedError("3 of 20 scenes have no image. Retry to generate just those."));
+check("no error is not", !isPausedError(null));
+check(
+    "a paused reel does not hold up its series",
+    isDue({ frequency: "daily", status: "active", hasInFlightReel: false }).due,
+);
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Plus, Clock, Loader2, Video, Sparkles, Settings, Volume2, Globe, Palette, Type, Trash2, X, Mic, Edit, Wand2, Calendar, Layout, Film } from "lucide-react";
+import { DeleteButton } from "@/components/DeleteButton";
+import { ArrowLeft, Plus, Clock, Loader2, Video, Sparkles, Settings, Volume2, Globe, Palette, Type, X, Mic, Edit, Wand2, Calendar, Layout, Film } from "lucide-react";
 import Link from "next/link";
 import { seriesStore } from "@/lib/series/seriesStore";
 import { Series, FacelessReel, ArtStyle } from "@/types/series";
@@ -481,20 +482,14 @@ export default function SeriesDetailPage() {
                                     <Edit size={13} />
                                     Review &amp; Export
                                 </Link>
-                                <button
-                                    onClick={async () => {
-                                        if (!confirm("Delete this reel?")) return;
-                                        try {
-                                            await seriesStore.deleteReel(reel.id!);
-                                            setReels(prev => prev.filter(r => r.id !== reel.id));
-                                        } catch (e) {
-                                            alert(e instanceof Error ? e.message : "Failed to delete reel");
-                                        }
+                                <DeleteButton
+                                    onDelete={async () => {
+                                        await seriesStore.deleteReel(reel.id!);
+                                        setReels(prev => prev.filter(r => r.id !== reel.id));
                                     }}
                                     className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border border-transparent hover:border-red-100"
-                                >
-                                    <Trash2 size={16} />
-                                </button>
+                                    title="Delete Reel"
+                                />
                             </div>
                         </div>
                     </div>

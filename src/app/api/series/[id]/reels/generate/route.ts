@@ -5,6 +5,7 @@ import { generateReel } from "@/lib/pipeline/generateReel";
 import { nextTopicFor } from "@/lib/pipeline/topicQueue";
 import { topicRepo } from "@/lib/db/topicRepo";
 import { prisma } from "@/lib/db/client";
+import { isPausedError } from "@/lib/scheduler/schedule";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -65,9 +66,12 @@ export async function POST(req: Request, { params }: Params) {
             if (!topic) return;
             const after = await prisma.reel.findUnique({
                 where: { id: reel.id! },
-                select: { script: true },
+                select: { script: true, generationError: true },
             });
-            if (!after?.script?.trim()) await topicRepo.release(topic.id);
+            // A paused reel keeps its topic: it will write that script later.
+            if (!after?.script?.trim() && !isPausedError(after?.generationError)) {
+                await topicRepo.release(topic.id);
+            }
         }).catch((error) => {
             // generateReel records stage failures on the row and only throws
             // if the reel itself cannot be loaded. Nothing is waiting on this

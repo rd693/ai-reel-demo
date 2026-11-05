@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Play, Pause, Layers, Trash2, ChevronRight, Film, Clock, FolderOpen, Loader2, CalendarClock } from "lucide-react";
+import { DeleteButton } from "../../../components/DeleteButton";
+import { Plus, Play, Pause, Layers, ChevronRight, Film, Clock, FolderOpen, Loader2, CalendarClock } from "lucide-react";
 import { seriesStore } from "../../../lib/series/seriesStore";
 import { Series, NicheType } from "../../../types/series";
 import { countLegacySeries, importLegacyData } from "../../../lib/series/legacyImport";
@@ -118,7 +119,6 @@ export default function SeriesDashboardPage() {
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm("Delete this series and all its reels?")) return;
         try {
             await seriesStore.deleteSeries(id);
         } catch (e) {
@@ -284,13 +284,13 @@ export default function SeriesDashboardPage() {
                                     {item.status === "active" ? <Pause size={12} /> : <Play size={12} />}
                                     {item.status === "active" ? "Pause" : "Resume"}
                                 </button>
-                                <button
-                                    onClick={() => handleDelete(item.id)}
+                                <DeleteButton
+                                    onDelete={() => handleDelete(item.id)}
+                                    armedLabel="Delete series and all its reels?"
                                     className="p-2 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 border border-transparent hover:border-red-100 transition-colors"
                                     title="Delete Series"
-                                >
-                                    <Trash2 size={15} />
-                                </button>
+                                    iconSize={15}
+                                />
                             </div>
                         </div>
                     ))}

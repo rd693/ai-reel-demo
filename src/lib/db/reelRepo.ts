@@ -117,6 +117,24 @@ export const reelRepo = {
     },
 
     /**
+     * Pauses reels whose generation has gone quiet, so the scheduler can pick
+     * them up. A run saves after every stage and every image, so one with no
+     * write since `before` belongs to a process that stopped. Until now such a
+     * reel stayed "generating" for good, and held up its whole series.
+     */
+    async pauseStalled(statuses: string[], before: Date, runningHere: string[], message: string): Promise<number> {
+        const { count } = await prisma.reel.updateMany({
+            where: {
+                generationStatus: { in: statuses },
+                updatedAt: { lt: before },
+                id: { notIn: runningHere },
+            },
+            data: { generationStatus: "failed", generationError: message },
+        });
+        return count;
+    },
+
+    /**
      * Moves reels off "rendering" after the render that set it was abandoned.
      *
      * "rendering" counts as in-flight for the scheduler, so a reel stuck there
@@ -127,10 +145,9 @@ export const reelRepo = {
         if (!ids.length) return 0;
         const { count } = await prisma.reel.updateMany({
             where: { id: { in: ids }, generationStatus: "rendering" },
-            data: {
-                generationStatus: "failed",
-                generationError: "Rendering was interrupted by a restart. Export again.",
-            },
+            // The reel itself is fine: only the export was lost, and the failed
+            // job row is what says so.
+            data: { generationStatus: "completed", generationError: null },
         });
         return count;
     },

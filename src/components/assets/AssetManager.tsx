@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Asset } from "../../types/reel";
-import { Upload, Trash2, Video as VideoIcon, Loader2, Plus } from "lucide-react";
+import { Upload, Video as VideoIcon, Loader2, Plus } from "lucide-react";
+import { DeleteButton } from "@/components/DeleteButton";
 
 export function AssetManager() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -55,19 +56,12 @@ export function AssetManager() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this asset?")) return;
+    const response = await fetch(`/api/assets/${id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) throw new Error("Failed to delete asset");
 
-    try {
-      const response = await fetch(`/api/assets/${id}`, {
-        method: "DELETE",
-      });
-
-      if (response.ok) {
-        setAssets((prev) => prev.filter((a) => a.id !== id));
-      }
-    } catch (error) {
-      console.error("Delete failed:", error);
-    }
+    setAssets((prev) => prev.filter((a) => a.id !== id));
   };
 
   if (isLoading) {
@@ -131,13 +125,12 @@ export function AssetManager() {
               )}
               
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                <button
-                  onClick={() => handleDelete(asset.id)}
+                <DeleteButton
+                  onDelete={() => handleDelete(asset.id)}
+                  armedLabel="Delete?"
                   className="p-2 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors"
                   title="Delete Asset"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                />
               </div>
 
               <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">

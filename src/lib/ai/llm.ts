@@ -846,8 +846,12 @@ function enrichWithSubject(
             // into prompts that Step 1 had just stripped it out of, sending
             // "महाराणा प्रताप, Maharana Pratap on horseback..." to an image
             // model that only reads English.
+            //
+            // Opening shot only: on every shot it made the hero appear in pictures
+            // of courtyards and letters, and every picture of a reel look alike.
             const promptableSubject = imageSubject(sanitizeVisualPrompt(subject));
             if (
+                index === 0 &&
                 promptableSubject &&
                 !prompt.toLowerCase().includes(promptableSubject.toLowerCase())
             ) {

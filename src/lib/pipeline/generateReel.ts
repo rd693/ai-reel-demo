@@ -13,6 +13,10 @@ import { persistMedia } from "../media/persistDataUrl";
 import { assignSceneTimings, estimateCaptionWords, resolveDurationMs } from "./timing";
 import { planShots, summarizeShotPlan } from "./shotPlan";
 import { writePublishCopy } from "./publishCopy";
+import { writeShotPrompts } from "./shotPrompts";
+import { reviewImage } from "../visuals/reviewImage";
+import { isOnline } from "../net/online";
+import { PAUSED_NO_INTERNET } from "../scheduler/schedule";
 import { assignShotMedia, resolveFormat } from "./format";
 import { planCards } from "./planCards";
 import { resolveDeck } from "../../compositions/cards/deck";
@@ -39,6 +43,12 @@ type Progress = { hasScript: boolean; hasVoiceover: boolean; missingImages: numb
  * MIN_VOICEOVER_BYTES, where a silent 251-byte MP3 passed for audio.
  */
 const MIN_IMAGE_BYTES = 40_000;
+
+/**
+ * Most redraws one reel may spend on images the review rejected. Each costs one
+ * more generation, so a reviewer being too strict is a bounded loss.
+ */
+const MAX_REDRAWS_PER_REEL = 6;
 
 async function looksGenerated(publicPath: string | undefined): Promise<boolean> {
     if (!publicPath) return false;
@@ -285,7 +295,30 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
             // Cards are printed stills, so a card reel never plans motion: a
             // clip inside a page would be a video playing on a sheet of paper.
             const planned = planShots(timed, captionWords);
-            const shots = deck ? planned : assignShotMedia(planned, format);
+
+            // Card reels get their pictures from the card planner below. For the
+            // rest, a storyboard failure leaves the planner's prompts, which are
+            // repetitive but valid: worth a warning, not worth losing the reel.
+            const styleSuffix = [series.visualStylePrompt, options.visualStyleOverride ?? row.visualStyleOverride]
+                .filter(Boolean)
+                .join(", ");
+            const storyboarded = deck
+                ? planned
+                : await writeShotPrompts({
+                      title: current.businessName,
+                      niche: options.niche ?? series.niche,
+                      script: current.script,
+                      shots: planned,
+                      styleSuffix: styleSuffix || undefined,
+                  }).catch((error) => {
+                      console.warn(
+                          `[pipeline ${reelId}] shot prompts skipped:`,
+                          error instanceof Error ? error.message : error,
+                      );
+                      return planned;
+                  });
+
+            const shots = deck ? storyboarded : assignShotMedia(storyboarded, format);
             const motionCount = shots.filter((s) => s.backgroundType === "video").length;
             console.log(
                 `[pipeline ${reelId}] shot plan — ${timed.length} beats → ${summarizeShotPlan(shots)}; ` +
@@ -334,6 +367,7 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
 
             const seed = current.seed ?? Math.floor(Math.random() * 2147483647);
             const scenes = [...current.scenes];
+            let redrawsLeft = MAX_REDRAWS_PER_REEL;
 
             // Checked once rather than per shot: with no provider configured a
             // motion reel would otherwise make the same futile call 30 times.
@@ -365,7 +399,7 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                 );
 
                 try {
-                    const url = await generateImage({
+                    let url = await generateImage({
                         prompt,
                         // A deck draws its own illustrations: one isolated
                         // subject on plain stock, never a scene.
@@ -392,6 +426,35 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                             `[pipeline ${reelId}] shot ${i + 1} came back blank (likely a content filter); leaving it unset`,
                         );
                         continue;
+                    }
+
+                    // A picture with a rider facing backwards is one redraw from
+                    // being fine. The redraw keeps the original if it fails, so a
+                    // provider hiccup here never costs a shot that exists.
+                    const review = redrawsLeft > 0 && background ? await reviewImage(background) : null;
+                    if (review && !review.ok) {
+                        redrawsLeft--;
+                        console.warn(
+                            `[pipeline ${reelId}] shot ${i + 1} rejected: ${review.problems.join("; ")} — redrawing`,
+                        );
+                        try {
+                            const retryUrl = await generateImage({
+                                prompt: review.fix ? `${review.fix}, ${prompt}` : prompt,
+                                style: deck ? deck.imageStyle : artStyle,
+                                seed: seed + i + 1000,
+                                usePremium,
+                            });
+                            const retried = await persistMedia(retryUrl, "uploads");
+                            if (await looksGenerated(retried)) {
+                                if (background?.startsWith("/")) {
+                                    await fs.unlink(path.join(process.cwd(), "public", background)).catch(() => {});
+                                }
+                                background = retried;
+                                url = retryUrl;
+                            }
+                        } catch (e) {
+                            console.warn(`[pipeline ${reelId}] redraw of shot ${i + 1} failed; keeping the first:`, e);
+                        }
                     }
 
                     // Motion is generated here, while the *generator's* URL is
@@ -427,6 +490,12 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                     scenes[i] = { ...scenes[i], backgroundUrl: background, backgroundType };
                 } catch (e) {
                     console.warn(`[pipeline ${reelId}] image ${i + 1} failed:`, e);
+                    // Every remaining shot would fail the same way, each one
+                    // waiting out the whole provider ladder first.
+                    if (!(await isOnline())) {
+                        console.warn(`[pipeline ${reelId}] offline; stopping until the connection returns`);
+                        break;
+                    }
                     continue;
                 }
 
@@ -445,7 +514,9 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
             ).length ?? 0;
 
         if (stillMissing > 0) {
-            const message = `${stillMissing} of ${final?.scenes.length} scenes have no image. Retry to generate just those.`;
+            const message = (await isOnline())
+                ? `${stillMissing} of ${final?.scenes.length} scenes have no image. Retry to generate just those.`
+                : PAUSED_NO_INTERNET;
             console.warn(`[pipeline ${reelId}] ${message}`);
             await reelRepo.setStatus(reelId, "failed", message);
             return;
@@ -456,6 +527,7 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`[pipeline ${reelId}] failed:`, message);
-        await reelRepo.setStatus(reelId, "failed", message).catch(() => {});
+        const stored = (await isOnline()) ? message : PAUSED_NO_INTERNET;
+        await reelRepo.setStatus(reelId, "failed", stored).catch(() => {});
     }
 }
