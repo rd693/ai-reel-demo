@@ -394,7 +394,7 @@ YOUR TWO JOBS — STRICTLY SEPARATE
 
 JOB 1 — SCRIPTWRITER (${effectiveLanguage}):
 Write all narration, headlines, title, and script in ${effectiveLanguage === 'hindi'
-            ? 'colloquial, beautifully spoken Hindi. You MUST write all Hindi narration text, headlines, and script strictly in pure DEVANAGARI HINDI characters (e.g., "पृथ्वीराज चौहान एक महान योद्धा थे..."). NEVER use Roman script / English alphabets (Hinglish like "Prithviraj Chauhan ek mahan...") for narrationText, script, title, or headlines. The audio generator needs Devanagari script to speak it with correct native Hindi pronunciation. Write for ears, not eyes.'
+            ? 'colloquial, beautifully spoken Hindi. You MUST write all Hindi narration text, headlines, and script strictly in pure DEVANAGARI HINDI characters (e.g., "पृथ्वीराज चौहान एक महान योद्धा थे..."). NEVER use Roman script / English alphabets (Hinglish like "Prithviraj Chauhan ek mahan...") for narrationText, script, title, or headlines. The audio generator needs Devanagari script to speak it with correct native Hindi pronunciation. English names and terms go in Devanagari too, spelled the way Indians say them ("ईस्ट इंडिया कंपनी", "रॉबर्ट क्लाइव", not "East India Company"). Write numbers and years as digits (1757, 80,000); they are spelled out in Hindi before voicing. Write for ears, not eyes.'
             : 'natural spoken English. Conversational, not academic.'
         }
 

@@ -13,6 +13,7 @@
 import { planShots, summarizeShotPlan, stripCameraAngle } from "../src/lib/pipeline/shotPlan";
 import { assignShotMedia } from "../src/lib/pipeline/format";
 import { speakable, speakableDiff } from "../src/lib/audio/speakable";
+import { spellHindiNumbers, spellHindiNumbersWithMap, restoreDisplayNumbers } from "../src/lib/audio/hindiNumbers";
 import { imageSubject } from "../src/lib/ai/llm";
 import { normalizeHashtags, fitTags, toPublishCopy } from "../src/lib/pipeline/publishCopy";
 import { applyShotPrompts, cleanShotPrompt } from "../src/lib/pipeline/shotPrompts";
@@ -234,6 +235,26 @@ check(
     "a paused reel does not hold up its series",
     isDue({ frequency: "daily", status: "active", hasInFlightReel: false }).due,
 );
+
+console.log("\nhindi numbers");
+check("a year reads as a year", spellHindiNumbers("1757 में") === "सत्रह सौ सत्तावन में");
+check("lakh grouping is a lakh, not a thousand", spellHindiNumbers("1,00,000 सैनिक") === "एक लाख सैनिक");
+check("western grouping works too", spellHindiNumbers("80,000 सेना") === "अस्सी हज़ार सेना");
+check("a short range borrows the century", spellHindiNumbers("1757-64") === "सत्रह सौ सत्तावन से सत्रह सौ चौंसठ");
+check("percent and decimals", spellHindiNumbers("2.5%") === "दो दशमलव पाँच प्रतिशत");
+check("devanagari digits", spellHindiNumbers("२३ जून") === "तेईस जून");
+check("crore", spellHindiNumbers("1,25,50,000") === "एक करोड़ पच्चीस लाख पचास हज़ार");
+check("years from 2000 read as numbers", spellHindiNumbers("2024") === "दो हज़ार चौबीस");
+{
+    const { text, numbers } = spellHindiNumbersWithMap("23 जून 1757 को, 3,000 सैनिक।");
+    const timed = text.split(" ").map((word, i) => ({ word, start: i, end: i + 0.5 }));
+    const shown = restoreDisplayNumbers(timed, numbers);
+    check("captions show the digits", shown.map((w) => w.word).join(" ") === "23 जून 1757 को, 3,000 सैनिक।", shown.map((w) => w.word).join(" "));
+    const year = shown.find((w) => w.word === "1757");
+    check("a number's caption spans all its spoken words", year?.start === 2 && year?.end === 4.5);
+    const missing = restoreDisplayNumbers(timed.filter((w) => w.word !== "तेईस"), numbers);
+    check("a number the voice skipped does not swallow the rest", missing.some((w) => w.word === "1757"));
+}
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);

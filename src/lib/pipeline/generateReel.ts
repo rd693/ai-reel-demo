@@ -7,6 +7,7 @@ import { generateScriptWithAI } from "../ai/llm";
 import { generateImage } from "../visuals/imageGen";
 import { generateClip, clipProvidersAvailable, stockFootageSuits } from "../visuals/clipGen";
 import { synthesizeVoiceover } from "../audio/synthesizeVoiceover";
+import { restoreDisplayNumbers, spellHindiNumbersWithMap } from "../audio/hindiNumbers";
 import { speakable, speakableDiff } from "../audio/speakable";
 import { transcribeAudio } from "../audio/transcribe";
 import { persistMedia } from "../media/persistDataUrl";
@@ -247,7 +248,17 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
 
             // Spoken text only — the stored script keeps its punctuation, and
             // captions follow the synthesiser's word timings either way.
-            const spoken = speakable(current.script);
+            // Hindi numbers are spelled out first: the voice reads digits
+            // inside Devanagari in English ("seventeen fifty-seven"). Keyed on
+            // the script itself, since the writer switches Indian subjects to
+            // Hindi even on an English series.
+            const isHindi = /[\u0900-\u097F]/.test(current.script);
+            const spelled = isHindi ? spellHindiNumbersWithMap(current.script) : { text: current.script, numbers: [] };
+            const spoken = speakable(spelled.text);
+            const latin = isHindi ? spoken.match(/[A-Za-z][A-Za-z'-]*/g) : null;
+            if (latin?.length) {
+                console.warn(`[pipeline ${reelId}] Roman-script words in a Hindi script will be read with an English accent: ${[...new Set(latin)].slice(0, 10).join(", ")}`);
+            }
             const diff = speakableDiff(current.script);
             if (diff.changed) {
                 console.log(`[pipeline ${reelId}] softened ${diff.pauses} hard pause(s) for speech`);
@@ -284,6 +295,9 @@ async function runPipeline(reelId: string, options: GenerateOptions): Promise<vo
                     }
                 }
             }
+
+            // Captions show "1757" where the voice said "सत्रह सौ सत्तावन".
+            if (words) words = restoreDisplayNumbers(words, spelled.numbers);
 
             const durationMs = resolveDurationMs(words, transcriptDuration, targetDuration);
             const captionWords = words ?? estimateCaptionWords(current.script, durationMs);
