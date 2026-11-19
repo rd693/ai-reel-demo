@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { DeleteButton } from "@/components/DeleteButton";
-import { ArrowLeft, Plus, Clock, Loader2, Video, Sparkles, Settings, Volume2, Globe, Palette, Type, X, Mic, Edit, Wand2, Calendar, Layout, Film } from "lucide-react";
+import { ArrowLeft, Plus, Clock, Loader2, Video, Sparkles, Settings, Volume2, Globe, Palette, Type, X, Mic, Edit, Wand2, Calendar, Layout, Film, Lightbulb } from "lucide-react";
 import Link from "next/link";
 import { seriesStore } from "@/lib/series/seriesStore";
 import { Series, FacelessReel, ArtStyle } from "@/types/series";
@@ -31,6 +31,59 @@ export default function SeriesDetailPage() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [tempSeries, setTempSeries] = useState<Series | null>(null);
     const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null);
+
+    // Reels and the topic queue are tabs, so the newest reel is at the top of
+    // the page instead of below the whole queue. The hash keeps the tab across
+    // a reload and lets a link open the queue directly.
+    const [tab, setTabState] = useState<"reels" | "topics">("reels");
+    const setTab = (next: "reels" | "topics") => {
+        setTabState(next);
+        history.replaceState(null, "", next === "topics" ? "#topics" : location.pathname + location.search);
+    };
+    useEffect(() => {
+        if (location.hash === "#topics") setTabState("topics");
+    }, []);
+    const [plannedCount, setPlannedCount] = useState(0);
+    const onPlannedCount = useCallback((n: number) => setPlannedCount(n), []);
+    const [topicsRefresh, setTopicsRefresh] = useState(0);
+    const [focusReelId, setFocusReelId] = useState<string | null>(null);
+
+    // "Find similar" on a reel: which one is running, and what it found.
+    const [similarFor, setSimilarFor] = useState<string | null>(null);
+    const [similarNote, setSimilarNote] = useState<
+        { reelId: string; title: string; added: number; genre?: string; error?: string } | null
+    >(null);
+
+    const findSimilar = async (reel: FacelessReel) => {
+        if (!reel.id) return;
+        setSimilarFor(reel.id);
+        setSimilarNote(null);
+        try {
+            const res = await fetch(`/api/reels/${reel.id}/similar-topics`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ count: 8 }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error ?? "Could not find similar ideas");
+            setSimilarNote({
+                reelId: reel.id,
+                title: reel.businessName || "this reel",
+                added: data.inserted?.length ?? 0,
+                genre: [data.dna?.genre, data.dna?.storyShape].filter(Boolean).join(" · "),
+            });
+            setTopicsRefresh((n) => n + 1);
+        } catch (error) {
+            setSimilarNote({
+                reelId: reel.id,
+                title: reel.businessName || "this reel",
+                added: 0,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            setSimilarFor(null);
+        }
+    };
 
     const togglePreview = (trackUrl: string) => {
         if (previewAudio) {
@@ -187,6 +240,9 @@ export default function SeriesDetailPage() {
             });
 
             setReels(prev => [reel, ...prev]);
+            setTab("reels");
+            // Starting from the queue uses up a topic.
+            setTopicsRefresh((n) => n + 1);
         } catch (error) {
             console.error("Failed to start generation", error);
             alert(error instanceof Error ? error.message : "Failed to start generation.");
@@ -397,15 +453,78 @@ export default function SeriesDetailPage() {
                 </div>
             </div>
 
-            {/* What gets made next, before anything is spent making it. */}
-            <TopicQueue seriesId={seriesId} />
+            <div className="flex items-center gap-1 mb-8 p-1 bg-slate-100 rounded-2xl w-full sm:w-fit" role="tablist">
+                {([
+                    { id: "reels", label: "Reels", count: reels.length, icon: Layout },
+                    { id: "topics", label: "Topic Queue", count: plannedCount, icon: Sparkles },
+                ] as const).map(({ id, label, count, icon: Icon }) => (
+                    <button
+                        key={id}
+                        role="tab"
+                        aria-selected={tab === id}
+                        onClick={() => setTab(id)}
+                        className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-sm font-black flex items-center justify-center gap-2 transition-all ${
+                            tab === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                        }`}
+                    >
+                        <Icon size={16} className={tab === id ? "text-indigo-600" : ""} />
+                        {label}
+                        <span className={`px-2 py-0.5 rounded-lg text-[11px] ${tab === id ? "bg-indigo-50 text-indigo-700" : "bg-slate-200 text-slate-600"}`}>
+                            {count}
+                        </span>
+                    </button>
+                ))}
+            </div>
 
-            {/* Reels List (Text-focused cards as requested) */}
-            <div className="space-y-6">
-                <h2 className="text-xl font-black text-slate-900 flex items-center gap-2 ml-2">
-                    <Layout size={22} className="text-indigo-600" />
-                    Production Library
-                </h2>
+            {/* What gets made next, before anything is spent making it. Kept
+                mounted on the reels tab so its count stays current. */}
+            <div className={tab === "topics" ? "" : "hidden"}>
+                <TopicQueue
+                    seriesId={seriesId}
+                    refreshKey={topicsRefresh}
+                    focusReelId={focusReelId}
+                    onPlannedCount={onPlannedCount}
+                />
+            </div>
+
+            {/* Reels List, newest first */}
+            <div className={`space-y-6 ${tab === "reels" ? "" : "hidden"}`}>
+                {similarNote && (
+                    <div
+                        className={`rounded-2xl p-5 text-sm flex items-start justify-between gap-4 border ${
+                            similarNote.error ? "bg-rose-50 border-rose-200 text-rose-800" : "bg-violet-50 border-violet-200 text-violet-900"
+                        }`}
+                    >
+                        <div className="min-w-0">
+                            {similarNote.error ? (
+                                <p className="font-bold">Couldn’t find ideas like “{similarNote.title}”: {similarNote.error}</p>
+                            ) : (
+                                <>
+                                    <p className="font-bold">
+                                        Added {similarNote.added} idea{similarNote.added === 1 ? "" : "s"} similar to “{similarNote.title}”
+                                    </p>
+                                    {similarNote.genre && <p className="text-violet-700 mt-1">{similarNote.genre}</p>}
+                                </>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                            {!similarNote.error && similarNote.added > 0 && (
+                                <button
+                                    onClick={() => {
+                                        setFocusReelId(similarNote.reelId);
+                                        setTab("topics");
+                                    }}
+                                    className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs whitespace-nowrap"
+                                >
+                                    View ideas
+                                </button>
+                            )}
+                            <button onClick={() => setSimilarNote(null)} className="p-1.5 rounded-lg hover:bg-black/5" title="Dismiss">
+                                <X size={14} />
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {reels.length === 0 && !generating ? (
                     <div className="py-20 text-center bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
@@ -434,7 +553,7 @@ export default function SeriesDetailPage() {
                 )}
 
                 {reels.map((reel, idx) => (
-                    <div key={idx} className="group bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all overflow-hidden">
+                    <div key={reel.id ?? idx} className="group bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all overflow-hidden">
                         <div className="px-6 py-4 flex items-center justify-between gap-4">
                             <div className="flex items-center gap-4 min-w-0">
                                 <div className={`p-3 rounded-xl transition-colors flex-shrink-0 ${
@@ -475,6 +594,18 @@ export default function SeriesDetailPage() {
                             </div>
 
                             <div className="flex items-center gap-2 flex-shrink-0">
+                                {/* Only a finished reel has a script worth learning from. */}
+                                {reel.generationStatus === "completed" && (
+                                    <button
+                                        onClick={() => findSimilar(reel)}
+                                        disabled={similarFor !== null}
+                                        title="Find new topics with the same genre and story vibe as this reel (takes a minute or two)"
+                                        className="px-3 py-2 bg-violet-50 text-violet-700 border border-violet-200 rounded-xl font-bold text-xs hover:bg-violet-100 disabled:opacity-50 transition-all flex items-center gap-1.5 whitespace-nowrap"
+                                    >
+                                        {similarFor === reel.id ? <Loader2 size={13} className="animate-spin" /> : <Lightbulb size={13} />}
+                                        <span className="hidden sm:inline">{similarFor === reel.id ? "Finding ideas…" : "Find similar"}</span>
+                                    </button>
+                                )}
                                 <Link
                                     href={`/dashboard/reels/${reel.id}`}
                                     className="px-4 py-2 bg-slate-900 text-white rounded-xl font-bold text-xs hover:bg-indigo-600 transition-all flex items-center gap-1.5 whitespace-nowrap"

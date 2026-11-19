@@ -31,6 +31,11 @@ export type PlanInput = {
     targetDuration: number;
     /** Titles already queued or already made — the planner must avoid these. */
     avoidTitles: string[];
+    /**
+     * Reels the user marked as performing well (by asking for more like them).
+     * The planner leans toward their genre and story shape.
+     */
+    winners?: string[];
     count: number;
     geo?: string;
     /** Pre-fetched signals. Omit and they are collected here. */
@@ -111,7 +116,14 @@ ${renderTrendBriefing(signals)}
 
 ALREADY MADE OR ALREADY QUEUED — do not propose these, or a near-variant of them:
 ${avoid}
-
+${
+    input.winners?.length
+        ? `
+WHAT HAS WORKED ON THIS CHANNEL — these reels outperformed the rest. Weight roughly a third of the batch toward the same genre, story shape and emotional pull, on different subjects:
+${input.winners.map((t) => `- ${t}`).join("\n")}
+`
+        : ""
+}
 TASK
 Return ${input.count} topics, ordered best-first, as JSON:
 
@@ -132,7 +144,7 @@ Spread the scores honestly — if only four of these are genuinely strong, the r
 }
 
 /** Keeps a model's answer inside the shape the database expects. */
-function sanitize(raw: unknown, fallbackCount: number): PlannedTopic[] {
+export function sanitizeTopics(raw: unknown, fallbackCount: number): PlannedTopic[] {
     const topics = (raw as { topics?: unknown[] })?.topics;
     if (!Array.isArray(topics)) throw new Error("Planner returned no topics array");
 
@@ -178,12 +190,123 @@ export async function planTopics(input: PlanInput): Promise<PlanResult> {
             geo: input.geo,
         }));
 
+    // Twice as many candidates as needed, then a separate critic keeps the
+    // best. A single pass grades its own work generously; a reader who did not
+    // write the list is much harder on a weak title.
+    const candidateCount = Math.min(40, input.count * 2);
     const { data, provider } = await callJsonLlm<unknown>({
         system: SYSTEM_PROMPT,
-        user: buildUserPrompt(input, signals),
+        user: buildUserPrompt({ ...input, count: candidateCount }, signals),
         label: `topic plan for "${input.niche}"`,
         temperature: 0.9,
     });
 
-    return { topics: sanitize(data, input.count), provider, signals };
+    const candidates = sanitizeTopics(data, candidateCount);
+    const topics = await judgeTopics(candidates, {
+        keep: input.count,
+        niche: input.niche,
+        language: input.language,
+        targetDuration: input.targetDuration,
+        avoidTitles: input.avoidTitles,
+        winners: input.winners,
+    });
+
+    return { topics, provider, signals };
+}
+
+const JUDGE_PROMPT = `You are the editor of a faceless short-video channel. A planner has proposed candidate topics; you decide which ones get made. Each one costs real money to narrate and illustrate, so be hard to impress.
+
+Score every candidate 0-100 on:
+- HOOK: would a stranger stop scrolling for this title in the first second? A named person, a concrete stake and an open question beat a label.
+- NOVELTY: is it genuinely different from what the channel has already made? A new title on an already-covered subject and story is a near-duplicate — score it below 30.
+- PAYOFF: can the script deliver what the title promises in the runtime, with facts that are true?
+- PICTURE: can an image model show it without a photograph existing?
+
+Then keep only the strongest, never two candidates about the same subject and story. You may tighten a title (same language and script, 6-12 words) but never change what it is about.
+
+Return ONLY valid JSON.`;
+
+type JudgeOptions = {
+    keep: number;
+    niche: string;
+    language: string;
+    targetDuration: number;
+    avoidTitles: string[];
+    winners?: string[];
+};
+
+/**
+ * Re-scores candidates and keeps the best `keep` of them.
+ *
+ * The critic is a second model call, so it can fail on its own; when it does,
+ * the planner's own ranking is used rather than losing the batch.
+ */
+export async function judgeTopics(candidates: PlannedTopic[], opts: JudgeOptions): Promise<PlannedTopic[]> {
+    if (candidates.length <= 1) return candidates;
+    const fallback = [...candidates].sort((a, b) => b.score - a.score).slice(0, opts.keep);
+
+    const list = candidates
+        .map((t, i) => `${i}. "${t.title}" — depicts ${t.subject}${t.angle ? ` — angle: ${t.angle}` : ""}`)
+        .join("\n");
+    const made = opts.avoidTitles.slice(0, 60).map((t) => `- ${t}`).join("\n") || "- (nothing yet)";
+
+    try {
+        const { data } = await callJsonLlm<{ verdicts?: Array<Record<string, unknown>> }>({
+            system: JUDGE_PROMPT,
+            user: `CHANNEL: ${opts.niche}, in ${opts.language}, about ${opts.targetDuration}s per video.
+${opts.winners?.length ? `\nREELS THAT PERFORMED BEST HERE:\n${opts.winners.map((t) => `- ${t}`).join("\n")}\n` : ""}
+ALREADY MADE OR QUEUED:
+${made}
+
+CANDIDATES:
+${list}
+
+Return the best ${opts.keep}, best first:
+{ "verdicts": [ { "index": 0, "score": 0-100, "title": "the title, tightened if it helps", "why": "one short sentence" } ] }`,
+            label: `topic review for "${opts.niche}"`,
+            temperature: 0.3,
+        });
+
+        return pickJudged(candidates, data?.verdicts, opts.keep) ?? fallback;
+    } catch (error) {
+        console.warn("[planner] review skipped:", error instanceof Error ? error.message : error);
+        return fallback;
+    }
+}
+
+/**
+ * Applies the critic's verdicts. Returns null when they are unusable, so the
+ * caller falls back to the planner's ranking.
+ */
+export function pickJudged(
+    candidates: PlannedTopic[],
+    verdicts: Array<Record<string, unknown>> | undefined,
+    keep: number,
+): PlannedTopic[] | null {
+    if (!Array.isArray(verdicts)) return null;
+
+    const picked: PlannedTopic[] = [];
+    const used = new Set<number>();
+    for (const v of verdicts) {
+        const index = Number(v.index);
+        if (!Number.isInteger(index) || !candidates[index] || used.has(index)) continue;
+        used.add(index);
+
+        const base = candidates[index];
+        const score = Number(v.score);
+        const title = String(v.title ?? "").trim();
+        const why = String(v.why ?? "").trim();
+        picked.push({
+            ...base,
+            // A rewritten title must still be a title, not an essay.
+            title: title && title.length <= 200 ? title : base.title,
+            score: Number.isFinite(score) ? Math.min(100, Math.max(0, Math.round(score))) : base.score,
+            rationale: [base.rationale, why && `Editor: ${why}`].filter(Boolean).join(" ").slice(0, 400),
+        });
+        if (picked.length >= keep) break;
+    }
+
+    if (!picked.length) return null;
+    console.log(`[planner] editor kept ${picked.length} of ${candidates.length} candidates`);
+    return picked;
 }

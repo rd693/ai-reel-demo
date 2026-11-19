@@ -130,6 +130,21 @@ async function hydrate(ids: string[], key: string): Promise<TopVideo[]> {
 }
 
 /**
+ * Views per day since upload. Total views favour whatever has been up longest;
+ * a video doing 50k a day in its first week says far more about what this
+ * audience wants now than one that took a year to reach a million.
+ */
+export function viewsPerDay(video: Pick<TopVideo, "views" | "publishedAt">): number {
+    const then = Date.parse(video.publishedAt);
+    const days = Number.isNaN(then) ? 30 : (Date.now() - then) / 86_400_000;
+    return video.views / Math.max(1, days);
+}
+
+export function rankByVelocity<T extends Pick<TopVideo, "views" | "publishedAt">>(videos: T[]): T[] {
+    return [...videos].sort((a, b) => viewsPerDay(b) - viewsPerDay(a));
+}
+
+/**
  * Best-performing recent videos across the given niche queries, by views.
  *
  * Returns an empty array when there is no API key — the planner degrades to
@@ -150,7 +165,9 @@ export async function fetchTopVideos(opts: YouTubeTrendOptions): Promise<TopVide
         const ids = [...new Set(idLists.flat())];
         const videos = await hydrate(ids, key);
 
-        const ranked = videos.sort((a, b) => b.views - a.views).slice(0, opts.limit ?? 20);
+        // Fastest-growing first, so a week-old hit is not cut in favour of a
+        // video that has simply been up for a month.
+        const ranked = rankByVelocity(videos).slice(0, opts.limit ?? 20);
         console.log(
             `[trends] YouTube: ${ranked.length} videos from ${queries.length} queries (~${queries.length * 100 + 1} quota units)`,
         );

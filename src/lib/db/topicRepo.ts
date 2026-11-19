@@ -21,6 +21,9 @@ export type TopicIdea = {
     rationale?: string;
     trendSource: string;
     score: number;
+    /** The reel this idea was discovered from, when it came from "Find similar". */
+    similarToReelId?: string;
+    similarToTitle?: string;
     status: TopicStatus;
     sortOrder: number;
     usedReelId?: string;
@@ -37,6 +40,8 @@ type Row = {
     rationale: string | null;
     trendSource: string;
     score: number;
+    similarToReelId: string | null;
+    similarToTitle: string | null;
     status: string;
     sortOrder: number;
     usedReelId: string | null;
@@ -54,6 +59,8 @@ function toTopic(row: Row): TopicIdea {
         rationale: row.rationale ?? undefined,
         trendSource: row.trendSource,
         score: row.score,
+        similarToReelId: row.similarToReelId ?? undefined,
+        similarToTitle: row.similarToTitle ?? undefined,
         status: row.status as TopicStatus,
         sortOrder: row.sortOrder,
         usedReelId: row.usedReelId ?? undefined,
@@ -90,6 +97,19 @@ export const topicRepo = {
      * Rejected titles are included deliberately: a topic the user skipped
      * should not come back in the next batch.
      */
+    /**
+     * Reels the user has asked to find more like. Nothing else in the app
+     * knows which reels performed, so these are the channel's proven winners.
+     */
+    async winningReelTitles(seriesId: string): Promise<string[]> {
+        const rows = await prisma.topicIdea.findMany({
+            where: { seriesId, similarToTitle: { not: null } },
+            select: { similarToTitle: true },
+            distinct: ["similarToTitle"],
+        });
+        return rows.map((r) => r.similarToTitle!).filter(Boolean);
+    },
+
     async knownTitles(seriesId: string): Promise<string[]> {
         const rows = await prisma.topicIdea.findMany({
             where: { seriesId },
@@ -105,7 +125,12 @@ export const topicRepo = {
      * stronger topic can still reach the front of the queue, while the planner
      * ordering inside one batch is preserved by the createdAt tiebreak.
      */
-    async insertMany(seriesId: string, topics: PlannedTopic[]): Promise<InsertReport> {
+    async insertMany(
+        seriesId: string,
+        topics: PlannedTopic[],
+        /** Marks every topic in this batch as discovered from one reel. */
+        similarTo?: { reelId: string; title: string },
+    ): Promise<InsertReport> {
         const existing = new Set(
             (await prisma.topicIdea.findMany({ where: { seriesId }, select: { dedupeKey: true } })).map(
                 (r) => r.dedupeKey,
@@ -134,6 +159,8 @@ export const topicRepo = {
                         trendSource: topic.trendSource,
                         score: topic.score,
                         dedupeKey,
+                        similarToReelId: similarTo?.reelId ?? null,
+                        similarToTitle: similarTo?.title ?? null,
                         // Highest score first; SQLite sorts ascending, so the
                         // score is stored inverted.
                         sortOrder: 100 - topic.score,

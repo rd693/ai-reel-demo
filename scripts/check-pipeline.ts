@@ -18,6 +18,8 @@ import { imageSubject } from "../src/lib/ai/llm";
 import { normalizeHashtags, fitTags, toPublishCopy } from "../src/lib/pipeline/publishCopy";
 import { applyShotPrompts, cleanShotPrompt } from "../src/lib/pipeline/shotPrompts";
 import { parseReview } from "../src/lib/visuals/reviewImage";
+import { pickJudged, type PlannedTopic } from "../src/lib/pipeline/planTopics";
+import { rankByVelocity } from "../src/lib/trends/youtubeTrends";
 import { isDue, isPausedError, PAUSED_NO_INTERNET, PAUSED_INTERRUPTED } from "../src/lib/scheduler/schedule";
 import {
     kenBurns,
@@ -254,6 +256,27 @@ check("years from 2000 read as numbers", spellHindiNumbers("2024") === "दो �
     check("a number's caption spans all its spoken words", year?.start === 2 && year?.end === 4.5);
     const missing = restoreDisplayNumbers(timed.filter((w) => w.word !== "तेईस"), numbers);
     check("a number the voice skipped does not swallow the rest", missing.some((w) => w.word === "1757"));
+}
+
+console.log("\ntopic discovery");
+{
+    const t = (title: string, score: number): PlannedTopic => ({
+        title, subject: title, angle: "", rationale: "planner", trendSource: "evergreen", score,
+    });
+    const candidates = [t("a", 90), t("b", 40), t("c", 70)];
+    const kept = pickJudged(candidates, [{ index: 1, score: 88, title: "b, sharper", why: "fresh" }, { index: 1, score: 10 }, { index: 7 }, { index: 2, score: 60 }], 2);
+    check("the editor's order and scores win", kept?.[0].title === "b, sharper" && kept?.[0].score === 88);
+    check("a repeated or unknown index is ignored", kept?.length === 2 && kept?.[1].title === "c");
+    check("the editor's reason is kept", !!kept?.[0].rationale.includes("Editor: fresh"));
+    check("unusable verdicts fall back", pickJudged(candidates, undefined, 2) === null && pickJudged(candidates, [{ index: 9 }], 2) === null);
+
+    const day = 86_400_000;
+    const ago = (d: number) => new Date(Date.now() - d * day).toISOString();
+    const ranked = rankByVelocity([
+        { title: "old hit", views: 1_000_000, publishedAt: ago(100) },
+        { title: "new riser", views: 200_000, publishedAt: ago(5) },
+    ]);
+    check("a fast new video outranks a slow old one", ranked[0].title === "new riser");
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");

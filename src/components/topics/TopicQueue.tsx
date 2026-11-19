@@ -12,7 +12,9 @@ import {
     TrendingUp,
     X,
     MonitorPlay,
+    Copy,
 } from "lucide-react";
+import Link from "next/link";
 
 import type { TopicIdea } from "@/lib/db/topicRepo";
 
@@ -74,13 +76,51 @@ function scoreClass(score: number): string {
     return "bg-slate-100 text-slate-600";
 }
 
-export function TopicQueue({ seriesId }: { seriesId: string }) {
+/** "Similar to …" — the reel a "Find similar" run discovered this idea from. */
+function SimilarBadge({ topic }: { topic: TopicIdea }) {
+    if (!topic.similarToTitle) return null;
+    const label = (
+        <>
+            <Copy size={11} className="shrink-0" />
+            <span className="truncate">Similar to “{topic.similarToTitle}”</span>
+        </>
+    );
+    const className =
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[11px] font-bold bg-violet-50 text-violet-700 border-violet-200 max-w-full";
+    return topic.similarToReelId ? (
+        <Link href={`/dashboard/reels/${topic.similarToReelId}`} className={`${className} hover:bg-violet-100`}>
+            {label}
+        </Link>
+    ) : (
+        <span className={className}>{label}</span>
+    );
+}
+
+export function TopicQueue({
+    seriesId,
+    refreshKey = 0,
+    focusReelId,
+    onPlannedCount,
+}: {
+    seriesId: string;
+    /** Bump to reload, e.g. after ideas were added from the reels tab. */
+    refreshKey?: number;
+    /** Show only ideas discovered from this reel. */
+    focusReelId?: string | null;
+    onPlannedCount?: (count: number) => void;
+}) {
     const [topics, setTopics] = useState<TopicIdea[]>([]);
     const [loading, setLoading] = useState(true);
     const [planning, setPlanning] = useState(false);
     const [summary, setSummary] = useState<PlanSummary | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [showHistory, setShowHistory] = useState(false);
+    // "all", "similar" (every discovered idea), or one reel's id.
+    const [filter, setFilter] = useState<string>("all");
+
+    useEffect(() => {
+        if (focusReelId) setFilter(focusReelId);
+    }, [focusReelId]);
 
     const load = useCallback(async () => {
         try {
@@ -97,7 +137,7 @@ export function TopicQueue({ seriesId }: { seriesId: string }) {
 
     useEffect(() => {
         void load();
-    }, [load]);
+    }, [load, refreshKey]);
 
     const plan = async () => {
         setPlanning(true);
@@ -143,11 +183,24 @@ export function TopicQueue({ seriesId }: { seriesId: string }) {
         await load();
     };
 
-    const planned = topics.filter((t) => t.status === "planned");
+    const allPlanned = topics.filter((t) => t.status === "planned");
+    const similarCount = allPlanned.filter((t) => t.similarToTitle).length;
+    const planned = allPlanned.filter((t) =>
+        filter === "all" ? true : filter === "similar" ? !!t.similarToTitle : t.similarToReelId === filter,
+    );
+    const focusedTitle =
+        filter !== "all" && filter !== "similar"
+            ? topics.find((t) => t.similarToReelId === filter)?.similarToTitle
+            : undefined;
+
+    useEffect(() => {
+        onPlannedCount?.(allPlanned.length);
+    }, [allPlanned.length, onPlannedCount]);
     const history = topics.filter((t) => t.status !== "planned");
     // Moving a topic to the front means beating the current lowest sortOrder,
     // not renumbering the queue.
-    const frontOfQueue = planned.length ? Math.min(...planned.map((t) => t.sortOrder)) - 1 : 0;
+    const frontOfQueue = allPlanned.length ? Math.min(...allPlanned.map((t) => t.sortOrder)) - 1 : 0;
+    const nextUpId = allPlanned[0]?.id;
 
     return (
         <div className="space-y-6 mb-10">
@@ -155,8 +208,8 @@ export function TopicQueue({ seriesId }: { seriesId: string }) {
                 <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
                     <Sparkles size={22} className="text-indigo-600" />
                     Topic Queue
-                    {planned.length > 0 && (
-                        <span className="text-sm font-bold text-slate-400">{planned.length} waiting</span>
+                    {allPlanned.length > 0 && (
+                        <span className="text-sm font-bold text-slate-400">{allPlanned.length} waiting</span>
                     )}
                 </h2>
 
@@ -202,9 +255,38 @@ export function TopicQueue({ seriesId }: { seriesId: string }) {
                 </div>
             )}
 
+            {similarCount > 0 && (
+                <div className="flex flex-wrap items-center gap-2 ml-2">
+                    {[
+                        { id: "all", label: `All (${allPlanned.length})` },
+                        { id: "similar", label: `Similar ideas (${similarCount})` },
+                        ...(focusedTitle ? [{ id: filter, label: `Similar to “${focusedTitle}”` }] : []),
+                    ].map((chip) => (
+                        <button
+                            key={chip.id}
+                            onClick={() => setFilter(chip.id)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all max-w-xs truncate ${
+                                filter === chip.id
+                                    ? "bg-slate-900 text-white border-slate-900"
+                                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"
+                            }`}
+                        >
+                            {chip.label}
+                        </button>
+                    ))}
+                </div>
+            )}
+
             {loading ? (
                 <div className="py-10 text-center text-slate-400">
                     <Loader2 className="animate-spin mx-auto" size={22} />
+                </div>
+            ) : planned.length === 0 && filter !== "all" ? (
+                <div className="py-10 text-center text-sm text-slate-500 bg-slate-50 rounded-[2rem]">
+                    No waiting ideas match this filter.{" "}
+                    <button onClick={() => setFilter("all")} className="font-bold text-indigo-600 hover:underline">
+                        Show all
+                    </button>
                 </div>
             ) : planned.length === 0 ? (
                 <div className="py-12 px-8 text-center bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
@@ -218,7 +300,7 @@ export function TopicQueue({ seriesId }: { seriesId: string }) {
                 </div>
             ) : (
                 <div className="space-y-3">
-                    {planned.map((topic, index) => (
+                    {planned.map((topic) => (
                         <div
                             key={topic.id}
                             className="bg-white border border-slate-200 rounded-2xl p-5 hover:border-indigo-200 transition-all"
@@ -233,12 +315,13 @@ export function TopicQueue({ seriesId }: { seriesId: string }) {
 
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        {index === 0 && (
+                                        {topic.id === nextUpId && (
                                             <span className="px-2 py-0.5 rounded-lg bg-indigo-600 text-white text-[11px] font-bold">
                                                 Next up
                                             </span>
                                         )}
                                         <SourceBadge source={topic.trendSource} />
+                                        <SimilarBadge topic={topic} />
                                     </div>
 
                                     <p className="font-bold text-slate-900 mt-2 break-words">{topic.title}</p>
@@ -254,7 +337,7 @@ export function TopicQueue({ seriesId }: { seriesId: string }) {
                                 </div>
 
                                 <div className="flex items-center gap-1 shrink-0">
-                                    {index > 0 && (
+                                    {topic.id !== nextUpId && (
                                         <button
                                             onClick={() => patch(topic.id, { sortOrder: frontOfQueue })}
                                             title="Make this the next reel"

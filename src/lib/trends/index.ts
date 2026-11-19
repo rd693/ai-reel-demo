@@ -1,7 +1,8 @@
 import { fetchRisingQueries, type RisingQuery } from "./googleTrends";
-import { fetchTopVideos, youtubeKey, type TopVideo } from "./youtubeTrends";
+import { fetchTopVideos, rankByVelocity, viewsPerDay, youtubeKey, type TopVideo } from "./youtubeTrends";
 
 export type { RisingQuery, TopVideo };
+export { fetchTopVideos, rankByVelocity, viewsPerDay };
 
 /**
  * Everything the planner is allowed to know about "right now".
@@ -27,10 +28,17 @@ export type CollectOptions = {
     /** Extra niche phrases to search YouTube for, beyond the niche itself. */
     extraQueries?: string[];
     withinDays?: number;
+    /** False skips today's general rising searches, for callers that ignore them. */
+    includeRising?: boolean;
 };
 
-function searchQueries(niche: string, extra: string[] | undefined): string[] {
-    return [...new Set([niche, `${niche} shorts`, ...(extra ?? [])].map((q) => q.trim()).filter(Boolean))];
+function searchQueries(niche: string, language: string, extra: string[] | undefined): string[] {
+    // A Hindi channel competes with Hindi videos; searching the bare English
+    // niche mostly returns English ones.
+    const local = language && language.toLowerCase() !== "english" ? [`${niche} ${language}`] : [];
+    return [
+        ...new Set([...(extra ?? []), niche, ...local, `${niche} shorts`].map((q) => q.trim()).filter(Boolean)),
+    ];
 }
 
 export async function collectTrendSignals(opts: CollectOptions): Promise<TrendSignals> {
@@ -40,16 +48,16 @@ export async function collectTrendSignals(opts: CollectOptions): Promise<TrendSi
 
     // Independent on purpose: one source failing must not cost the other.
     const [risingQueries, topVideos] = await Promise.all([
-        fetchRisingQueries(geo),
+        opts.includeRising === false ? Promise.resolve([]) : fetchRisingQueries(geo),
         fetchTopVideos({
-            queries: searchQueries(opts.niche, opts.extraQueries),
+            queries: searchQueries(opts.niche, opts.language, opts.extraQueries),
             regionCode: geo,
             relevanceLanguage,
             withinDays: opts.withinDays ?? 30,
         }),
     ]);
 
-    if (!risingQueries.length) notes.push("Google Trends returned nothing — no rising-query signal.");
+    if (!risingQueries.length && opts.includeRising !== false) notes.push("Google Trends returned nothing — no rising-query signal.");
     if (!youtubeKey()) {
         notes.push("No YOUTUBE_API_KEY — no signal about which titles are performing in this niche.");
     } else if (!topVideos.length) {
@@ -106,17 +114,18 @@ export function renderTrendBriefing(signals: TrendSignals): string {
     }
 
     if (signals.topVideos.length) {
-        const lines = signals.topVideos
+        const lines = rankByVelocity(signals.topVideos)
             .slice(0, 15)
             .map((v) => {
                 const age = daysAgo(v.publishedAt);
                 const form = v.durationSeconds && v.durationSeconds <= 180 ? "short" : "long";
-                return `- "${v.title}" — ${compactViews(v.views)} views${age === null ? "" : `, ${age}d old`}, ${form}, ${v.channel}`;
+                const pace = age === null ? "" : `, ${compactViews(viewsPerDay(v))}/day`;
+                return `- "${v.title}" — ${compactViews(v.views)} views${age === null ? "" : `, ${age}d old`}${pace}, ${form}, ${v.channel}`;
             })
             .join("\n");
 
         parts.push(
-            `ALREADY PERFORMING IN THIS NICHE (recent, by views — study which subjects and which title shapes earn clicks, do not copy a title):\n${lines}`,
+            `ALREADY PERFORMING IN THIS NICHE (recent, fastest-growing first — views per day matters more than total, because an old video has simply had longer. Study which subjects, story shapes and title shapes earn clicks; do not copy a title):\n${lines}`,
         );
     }
 

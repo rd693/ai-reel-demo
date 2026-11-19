@@ -216,6 +216,12 @@ model TopicIdea {
   // duplicates; the prompt only reduces how often one is proposed.
   dedupeKey String
 
+  // Set when the idea was discovered from a reel that performed well: the
+  // queue shows "similar to <title>". The title is copied so the label
+  // survives the reel being deleted.
+  similarToReelId String?
+  similarToTitle  String?
+
   status     String    @default("planned") // planned | used | skipped
   sortOrder  Int       @default(0)
   usedReelId String?

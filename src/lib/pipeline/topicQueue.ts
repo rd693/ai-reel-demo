@@ -56,6 +56,7 @@ export async function refillQueue(
         seriesContext: series.seriesContext,
         targetDuration: series.targetDuration || 60,
         avoidTitles,
+        winners: await topicRepo.winningReelTitles(seriesId),
         count: options.count ?? DEFAULT_PLAN_COUNT,
         geo: options.geo,
     });
